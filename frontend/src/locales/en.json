@@ -1,0 +1,61 @@
+{
+  "app": {
+    "title": "MinerPick",
+    "original_pdf": "Original PDF",
+    "upload": "Upload PDF",
+    "upload_hint": "Click or drag file to this area to upload",
+    "upload_hint_sub": "Only support single PDF file",
+    "converting": "Converting...",
+    "waiting": "Waiting for upload...",
+    "github": "GitHub",
+    "settings": "Settings"
+  },
+  "settings": {
+    "title": "API Settings",
+    "mineru_api_url": "MinerU API URL",
+    "mineru_api_key": "MinerU API Key",
+    "mineru_api_url_placeholder": "e.g.: http://localhost:8000",
+    "mineru_api_key_placeholder": "Enter your API Key (Optional)",
+    "save": "Save Settings",
+    "reset": "Reset Default",
+    "save_success": "Settings saved",
+    "save_hint": "Hint: If left empty, the server configuration will be used by default."
+  },
+  "viewer": {
+    "highlight_all": "Highlight All",
+    "highlight_off": "Highlight Off",
+    "download": "Download Markdown",
+    "preview_url": "Preview URL",
+    "start_convert": "Convert to Markdown",
+    "select_engine": "Select Engine:",
+    "upload_hint": "Upload PDF to view results",
+    "engine_mineru": "MinerU",
+    "engine_pymupdf": "PyMuPDF (Coming Soon)",
+    "edit_block": "Edit Block",
+    "edit_cell": "Edit Cell",
+    "edit": "Edit Markdown",
+    "save": "Save Changes",
+    "cancel": "Cancel Edit",
+    "loading_pdf": "Loading PDF...",
+    "page": "Page {page}",
+    "no_pdf": "No PDF file",
+    "dblclick_edit": "Double-click to edit"
+  },
+  "tabs": {
+    "full_conversion": "Full Conversion",
+    "main_content": "Main Content",
+    "ai_extraction": "AI Extraction"
+  },
+  "messages": {
+    "main_content_dev": "Main content extraction feature is under development...",
+    "ai_feature_dev": "AI analysis feature is under development...",
+    "uploading": "Uploading PDF file...",
+    "upload_failed": "File upload failed",
+    "starting_engine": "Starting {engine} parsing engine for deep analysis...",
+    "extracting_layout": "Extracting PDF layout and text info...",
+    "converting_markdown": "Converting content to Markdown format...",
+    "convert_success": "Conversion completed!",
+    "convert_failed": "Parsing and conversion failed",
+    "parse_failed": "Parsing failed: {error}"
+  }
+}

@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  pdfmirror:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./results:/app/results
+    environment:
+      - MinerU_API_URL=${MinerU_API_URL}
+      - PORT=8000

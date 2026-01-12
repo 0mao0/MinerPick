@@ -1,0 +1,4 @@
+include requirements.txt
+recursive-include backend *
+global-exclude __pycache__
+global-exclude *.py[cod]

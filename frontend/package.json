@@ -1,0 +1,30 @@
+{
+  "name": "minerpick-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "@types/markdown-it": "^14.1.2",
+    "ant-design-vue": "^4.2.6",
+    "axios": "^1.13.2",
+    "markdown-it": "^14.1.0",
+    "pdfjs-dist": "^5.4.530",
+    "vue": "^3.5.24",
+    "vue-i18n": "^11.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/tsconfig": "^0.8.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4",
+    "vue-tsc": "^3.1.4"
+  }
+}

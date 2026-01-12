@@ -1,0 +1,61 @@
+{
+  "app": {
+    "title": "MinerPick",
+    "original_pdf": "原始PDF",
+    "upload": "上传 PDF 文档",
+    "upload_hint": "点击或拖拽文件到此处上传",
+    "upload_hint_sub": "仅支持单PDF文件",
+    "converting": "正在转换中...",
+    "waiting": "等待上传...",
+    "github": "GitHub",
+    "settings": "设置"
+  },
+  "settings": {
+    "title": "API 设置",
+    "mineru_api_url": "MinerU API 地址",
+    "mineru_api_key": "MinerU API Key",
+    "mineru_api_url_placeholder": "例如: http://localhost:8000",
+    "mineru_api_key_placeholder": "请输入您的 API Key (可选)",
+    "save": "保存设置",
+    "reset": "重置默认",
+    "save_success": "设置已保存",
+    "save_hint": "提示：如果不填写，将默认使用服务器配置"
+  },
+  "viewer": {
+    "highlight_all": "全部高亮",
+    "highlight_off": "关闭高亮",
+    "download": "下载 Markdown",
+    "preview_url": "预览链接",
+    "start_convert": "立即转换为 Markdown",
+    "select_engine": "选择解析引擎:",
+    "upload_hint": "上传 PDF 后在此查看解析结果",
+    "engine_mineru": "MinerU",
+    "engine_pymupdf": "PyMuPDF (待扩展)",
+    "edit_block": "编辑区块",
+    "edit_cell": "编辑单元格",
+    "edit": "编辑 Markdown",
+    "save": "保存修改",
+    "cancel": "取消编辑",
+    "loading_pdf": "加载 PDF 中...",
+    "page": "第 {page} 页",
+    "no_pdf": "暂无 PDF 文件",
+    "dblclick_edit": "双击进入编辑模式"
+  },
+  "tabs": {
+    "full_conversion": "全文转换",
+    "main_content": "主要内容",
+    "ai_extraction": "AI提取"
+  },
+  "messages": {
+    "main_content_dev": "主要内容提取功能正在开发中...",
+    "ai_feature_dev": "AI 智能分析功能正在开发中...",
+    "uploading": "正在上传 PDF 文件...",
+    "upload_failed": "文件上传失败",
+    "starting_engine": "正在启动 {engine} 解析引擎进行深度解析...",
+    "extracting_layout": "正在提取 PDF 布局与文字信息...",
+    "converting_markdown": "正在转换内容为 Markdown 格式...",
+    "convert_success": "转换完成！",
+    "convert_failed": "解析转换失败",
+    "parse_failed": "解析失败: {error}"
+  }
+}
