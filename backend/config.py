@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
@@ -12,7 +13,7 @@ load_dotenv(ROOT_DIR / ".env")
 class Settings(BaseSettings):
     # MinerU API 配置
     mineru_api_url: str = "http://localhost:8000"
-    mineru_api_key: str | None = None
+    mineru_api_key: Optional[str] = None
     
     # 服务配置
     host: str = "0.0.0.0"

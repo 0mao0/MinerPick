@@ -1,5 +1,9 @@
 from .base import BaseParser
-from .fullParse_mineru import MinerUParser
+try:
+    from .fullParse_mineru import MinerUParser
+except ImportError:
+    MinerUParser = None
+    
 from .fullParse_pymupdf import PyMuPDFParser
 
-__all__ = ["BaseParser", "MinerUParser", "PyMuPDFParser"]
+__all__ = ['BaseParser', 'PyMuPDFParser', 'MinerUParser']

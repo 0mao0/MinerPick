@@ -3,6 +3,7 @@ import uuid
 import json
 import httpx
 from pathlib import Path
+from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -29,10 +30,12 @@ app.add_middleware(
 )
 
 # Initialize Parsers
-PARSERS = {
-    "mineru": MinerUParser(api_url=settings.mineru_api_url, api_key=settings.mineru_api_key),
-    "pymupdf": PyMuPDFParser()
-}
+PARSERS = {}
+
+if MinerUParser is not None:
+    PARSERS["mineru"] = MinerUParser(api_url=settings.mineru_api_url, api_key=settings.mineru_api_key)
+    
+PARSERS["pymupdf"] = PyMuPDFParser()
 
 def get_unique_filename(directory: Path, filename: str) -> Path:
     """Get a unique filename in the directory by adding a suffix if it already exists."""
@@ -77,8 +80,8 @@ class ConvertRequest(BaseModel):
     task_id: str
     filename: str
     provider: str = "pymupdf"  # Default to pymupdf
-    mineru_api_url: str | None = None
-    mineru_api_key: str | None = None
+    mineru_api_url: Optional[str] = None
+    mineru_api_key: Optional[str] = None
 
 @app.post("/api/convert")
 async def convert_pdf(request: ConvertRequest):
