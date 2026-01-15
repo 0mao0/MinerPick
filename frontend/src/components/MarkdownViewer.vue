@@ -846,29 +846,10 @@ const downloadMd = () => {
   box-shadow: 0 0 0 1px rgba(0, 123, 255, 0.1);
 }
 
-/* Tooltip hint for double click at the top-right of the block or cell */
-.md-block:not(.md-table-block):hover::after,
-:deep(td:hover::after),
-:deep(th:hover::after) {
-  content: var(--edit-hint);
-  position: absolute;
-  top: 2px;
-  right: 6px;
-  font-size: 10px;
-  color: #1890ff;
-  opacity: 0.8;
-  pointer-events: none;
-  z-index: 10;
-  background: rgba(255, 255, 255, 0.7);
-  padding: 0 2px;
-  border-radius: 2px;
-}
-
 :deep(td), :deep(th) {
   position: relative;
 }
 
-/* For Chinese locale, we can use a dynamic approach or just keep it English as a common dev indicator, */
 .md-block:active {
   background-color: rgba(0, 123, 255, 0.1);
 }

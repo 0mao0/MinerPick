@@ -9,6 +9,8 @@
 
 **MinerPick** is an intelligent PDF-to-Markdown conversion platform that provides a high-fidelity "mirror" experience. It doesn't just convert text; it bridges the visual gap between your original document and its digital structure.
 
+
+
 ### 🌟 Key Features
 
 - **High-Fidelity Conversion**: Powered by **MinerU**, the world-class PDF parsing engine, ensuring accurate extraction of complex layouts, formulas, and tables.
@@ -23,6 +25,22 @@
 - **Frontend**: Vue 3, Vite, TypeScript, Ant Design Vue 4, Vue-i18n.
 - **Backend**: FastAPI, Pydantic v2, PyMuPDF.
 - **Parsing Engine**: MinerU API (v2.6.4) / Local Parsers.
+
+### 🛠️ Architecture
+
+#### 1. Backend Parsing Flow
+<p align="center">
+  <img src="docs/images/backend_flow.png" width="800px" />
+</p>
+
+*The core logic involves MinerU for initial parsing and GMFT for high-precision table cell extraction.*
+
+#### 2. Frontend Highlight Sync
+<p align="center">
+  <img src="docs/images/frontend_sync.png" width="800px" />
+</p>
+
+*Markdown blocks are mapped to PDF coordinates (bbox) via `md_index`, allowing real-time synchronized highlighting.*
 
 ### 🛠️ Getting Started
 
@@ -97,10 +115,23 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **前端**: Vue 3, Vite, TypeScript, Ant Design Vue 4, Vue-i18n.
 - **后端**: FastAPI, Pydantic v2, PyMuPDF.
-- **解析引擎**: MinerU API (v2.6.4) / 本地解析器。
+- **解析引擎**: MinerU API (v2.6.4) / 本地解析器.
 
-### 📄 开源协议
-本项目采用 MIT 开源协议 - 详见 [LICENSE](LICENSE) 文件。
+### 🛠️ 技术架构
+
+#### 1. 后端解析流程
+<p align="center">
+  <img src="docs/images/backend_flow.png" width="800px" />
+</p>
+
+*核心逻辑：使用 MinerU 进行基础解析，并集成 GMFT 模型实现高精度表格单元格坐标提取。*
+
+#### 2. 前端高亮同步原理
+<p align="center">
+  <img src="docs/images/frontend_sync.png" width="800px" />
+</p>
+
+*Markdown 块通过 `md_index` 与 PDF 坐标（bbox）建立映射，实现实时的交互式高亮对齐。*
 
 ### 🛠️ 快速入门
 
@@ -153,4 +184,4 @@ npm run dev
 本项目由 **MinerU** 和 **gmft** 提供动力。特别感谢开源社区提供的这些出色工具。
 
 ### 📄 开源协议
-本项目采用 Apache License 2.0 协议 - 详情请参阅 [LICENSE](LICENSE) 文件。
+本项目采用 MIT 协议 - 详情请参阅 [LICENSE](LICENSE) 文件。
