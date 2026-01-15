@@ -1,6 +1,6 @@
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 import os
 import json
 
@@ -70,60 +70,11 @@ class BaseParser(ABC):
             return ""
         text = re.sub(r"^#{1,6}\s+", "", text)
         text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
-        # Do not strip numbering (e.g. "1. ") as it's often part of titles we want to match
-        # text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
         text = re.sub(r"`{1,3}([^`]+)`{1,3}", r"\1", text)
         text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", text)
         text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
         text = re.sub(r"\s+", " ", text)
         return text.strip()
-
-    def _normalize_match_text(self, text: str) -> str:
-        """Normalize text for better fuzzy matching."""
-        if not text:
-            return ""
-        # Lowercase
-        text = text.lower()
-        # Replace common full-width punctuation
-        replacements = {
-            "：": ":",
-            "（": "(",
-            "）": ")",
-            "，": ",",
-            "。": ".",
-            "；": ";",
-            "！": "!",
-            "？": "?",
-            "“": "\"",
-            "”": "\"",
-            "‘": "'",
-            "’": "'",
-            "—": "-",
-            " ": ""  # Remove all spaces for matching
-        }
-        for old, new in replacements.items():
-            text = text.replace(old, new)
-        
-        # Remove standard punctuation
-        import string
-        text = text.translate(str.maketrans('', '', string.punctuation))
-        
-        return text.strip()
-
-    def _normalize_bbox(self, bbox: Any, page_width: float, page_height: float) -> List[int]:
-        """
-        Normalize bbox to [0, 1000] integer coordinates.
-        bbox: (x0, y0, x1, y1)
-        """
-        if not bbox or len(bbox) != 4:
-            return [0, 0, 0, 0]
-        x0, y0, x1, y1 = bbox
-        return [
-            int(max(0, min(1000, x0 / page_width * 1000))),
-            int(max(0, min(1000, y0 / page_height * 1000))),
-            int(max(0, min(1000, x1 / page_width * 1000))),
-            int(max(0, min(1000, y1 / page_height * 1000))),
-        ]
 
 
 

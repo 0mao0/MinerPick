@@ -32,9 +32,9 @@
           class="md-block md-md"
           :class="{
             'highlight-mapped': isHighlightAll && getBlockStatus(index) === 'mapped' && !isTableBlock(index),
+            'highlight-raw-mapped': isRawVisible && getBlockStatus(index) === 'mapped',
             'md-table-block': isTableBlock(index)
           }"
-          :title="t('viewer.dblclick_edit')"
           :style="{ '--edit-hint': `'${t('viewer.dblclick_edit')}'` }"
           @click="handleMdBlockClick(index, $event)"
           @dblclick="handleMdBlockDblClick(index, $event)"
@@ -56,13 +56,30 @@
   <!-- Floating action buttons (Bottom Right: Download, Toggle highlights) -->
     <div v-if="mdContent" class="download-action">
       <a-space direction="vertical">
-        <a-tooltip :title="isHighlightAll ? t('viewer.highlight_off') : t('viewer.highlight_all')" placement="left">
+        <a-tooltip :title="isRawVisible ? t('app.hide_raw') : t('app.show_raw')" placement="left">
+          <a-button 
+            :type="isRawVisible ? 'primary' : 'default'" 
+            shape="circle" 
+            size="large" 
+            @click="$emit('toggle-raw-visible')" 
+            class="action-btn raw-toggle-btn"
+            :style="isRawVisible ? { backgroundColor: '#1890ff', borderColor: '#1890ff' } : {}"
+          >
+            <template #icon>
+              <EyeOutlined v-if="!isRawVisible" />
+              <EyeInvisibleOutlined v-else />
+            </template>
+          </a-button>
+        </a-tooltip>
+
+        <a-tooltip :title="isHighlightAll ? t('app.hide_modified') : t('app.show_modified')" placement="left">
           <a-button 
             :type="isHighlightAll ? 'primary' : 'default'" 
             shape="circle" 
             size="large" 
             @click="$emit('toggle-highlight-all')" 
-            class="action-btn"
+            class="action-btn modified-toggle-btn"
+            :style="isHighlightAll ? { backgroundColor: '#ff4d4f', borderColor: '#ff4d4f' } : {}"
           >
             <template #icon>
               <EyeOutlined v-if="!isHighlightAll" />
@@ -114,6 +131,7 @@ interface Props {
   contentTables?: Record<string, any>;
   emptyDescription?: string;
   isHighlightAll?: boolean;
+  isRawVisible?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -126,6 +144,7 @@ const emit = defineEmits<{
   (e: 'convert'): void;
   (e: 'element-click', data: any): void;
   (e: 'toggle-highlight-all'): void;
+  (e: 'toggle-raw-visible'): void;
 }>();
 
 // Block editing state
@@ -287,9 +306,317 @@ const getBlockStatus = (index: number) => {
   return 'unmapped';
 };
 
+type TableGrid = {
+  grid: HTMLTableCellElement[][];
+  posByCell: Map<HTMLTableCellElement, { r: number; c: number; rowSpan: number; colSpan: number }>;
+};
+
+type TableAlignment = {
+  rowOffset: number;
+  colOffset: number;
+  score: number;
+  matched: number;
+  compared: number;
+};
+
+const toIntOr = (v: any, fallback: number) => {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+  return fallback;
+};
+
+const compactCellText = (text: string) => {
+  const s = (text || '').toLowerCase().replace(/\s+/g, '');
+  if (!s) return '';
+  let out = '';
+  for (const ch of s) {
+    const code = ch.charCodeAt(0);
+    if ((code >= 0x4e00 && code <= 0x9fff) || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+      out += ch;
+    }
+  }
+  return out;
+};
+
+const buildTableGrid = (table: HTMLTableElement): TableGrid => {
+  const grid: HTMLTableCellElement[][] = [];
+  const posByCell = new Map<HTMLTableCellElement, { r: number; c: number; rowSpan: number; colSpan: number }>();
+  const rows = table.rows;
+
+  for (let r = 0; r < rows.length; r++) {
+    const tr = rows[r];
+    if (!tr) continue;
+    if (!grid[r]) grid[r] = [];
+    const rowArr = grid[r]!;
+
+    let c = 0;
+    for (let i = 0; i < tr.cells.length; i++) {
+      const cell = tr.cells[i];
+      if (!cell) continue;
+
+      while (rowArr[c]) c++;
+
+      const rowSpan = cell.rowSpan || 1;
+      const colSpan = cell.colSpan || 1;
+
+      if (!posByCell.has(cell)) {
+        posByCell.set(cell, { r, c, rowSpan, colSpan });
+      }
+
+      for (let rs = 0; rs < rowSpan; rs++) {
+        const rr = r + rs;
+        if (!grid[rr]) grid[rr] = [];
+        const rrArr = grid[rr]!;
+        for (let cs = 0; cs < colSpan; cs++) {
+          rrArr[c + cs] = cell;
+        }
+      }
+
+      c += colSpan;
+    }
+  }
+
+  return { grid, posByCell };
+};
+
+const buildDomTextGrid = (grid: HTMLTableCellElement[][]) => {
+  const out: string[][] = [];
+  for (let r = 0; r < grid.length; r++) {
+    const row = grid[r] || [];
+    out[r] = [];
+    for (let c = 0; c < row.length; c++) {
+      const cell = row[c];
+      if (!cell) continue;
+      const key = compactCellText(cell.textContent || '');
+      if (key) out[r]![c] = key;
+    }
+  }
+  return out;
+};
+
+const buildHtmlTextGrid = (html: string) => {
+  const out: string[][] = [];
+  if (!html) return out;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const table = doc.querySelector('table');
+  if (!table) return out;
+  const rows = Array.from(table.querySelectorAll('tr'));
+  for (let r = 0; r < rows.length; r++) {
+    const tr = rows[r];
+    if (!tr) continue;
+    const cells = Array.from(tr.querySelectorAll('th, td'));
+    out[r] = [];
+    for (let c = 0; c < cells.length; c++) {
+      const td = cells[c];
+      if (!td) continue;
+      const key = compactCellText(td.textContent || '');
+      if (key) out[r]![c] = key;
+    }
+  }
+  return out;
+};
+
+const computeTableAlignment = (domGrid: string[][], refGrid: string[][]): TableAlignment => {
+  const domH = domGrid.length;
+  const refH = refGrid.length;
+  const refW = Math.max(0, ...refGrid.map(r => (r || []).length));
+
+  const rawTexts: Array<{ r: number; c: number; t: string }> = [];
+  for (let r = 0; r < domH; r++) {
+    const row = domGrid[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      const t = row[c];
+      if (t) rawTexts.push({ r, c, t });
+    }
+  }
+
+  if (rawTexts.length === 0 || refH === 0 || refW === 0) {
+    return { rowOffset: 0, colOffset: 0, score: 0, matched: 0, compared: 0 };
+  }
+
+  const tokenCount = new Map<string, number>();
+  for (const it of rawTexts) {
+    tokenCount.set(it.t, (tokenCount.get(it.t) || 0) + 1);
+  }
+
+  const texts = rawTexts.filter(it => {
+    const cnt = tokenCount.get(it.t) || 0;
+    if (it.t.length >= 2) return true;
+    return cnt > 0 && cnt <= 2;
+  });
+
+  if (texts.length === 0) {
+    return { rowOffset: 0, colOffset: 0, score: 0, matched: 0, compared: 0 };
+  }
+
+  let best: TableAlignment = { rowOffset: 0, colOffset: 0, score: 0, matched: 0, compared: 0 };
+  const rangeR = 12;
+  const rangeC = 8;
+
+  for (let ro = -rangeR; ro <= rangeR; ro++) {
+    for (let co = -rangeC; co <= rangeC; co++) {
+      let matched = 0;
+      let compared = 0;
+      for (const it of texts) {
+        const rr = it.r + ro;
+        const cc = it.c + co;
+        if (rr < 0 || cc < 0 || rr >= refH || cc >= refW) continue;
+        const rt = refGrid[rr]?.[cc];
+        if (!rt) continue;
+        compared++;
+        if (rt === it.t) matched++;
+      }
+      const score = compared > 0 ? matched / compared : 0;
+      if (
+        score > best.score ||
+        (score === best.score && matched > best.matched) ||
+        (score === best.score && matched === best.matched && (Math.abs(ro) + Math.abs(co)) < (Math.abs(best.rowOffset) + Math.abs(best.colOffset)))
+      ) {
+        best = { rowOffset: ro, colOffset: co, score, matched, compared };
+      }
+    }
+  }
+
+  if (best.matched === 0 || best.compared === 0) {
+    return { rowOffset: 0, colOffset: 0, score: best.score, matched: best.matched, compared: best.compared };
+  }
+  return best;
+};
+
+const tableAlignmentCache = new Map<string, TableAlignment>();
+
+const getTableAlignment = (tableId: string, domTable: HTMLTableElement, tableData: any): TableAlignment => {
+  const cached = tableAlignmentCache.get(tableId);
+  if (cached) return cached;
+  const { grid } = buildTableGrid(domTable);
+  const domText = buildDomTextGrid(grid);
+  const refText = buildHtmlTextGrid(String(tableData?.html || ''));
+  const align = computeTableAlignment(domText, refText);
+  tableAlignmentCache.set(tableId, align);
+  return align;
+};
+
+const getCellRCSpan = (cellData: any) => {
+  const r = toIntOr(cellData?.r ?? cellData?.row, -1);
+  const c = toIntOr(cellData?.c ?? cellData?.col, -1);
+  const rowSpan = Math.max(1, toIntOr(cellData?.row_span ?? cellData?.rowSpan, 1));
+  const colSpan = Math.max(1, toIntOr(cellData?.col_span ?? cellData?.colSpan, 1));
+  return { r, c, rowSpan, colSpan };
+};
+
+const parseTableIdNumber = (id: string) => {
+  const m = String(id || '').match(/m_table_(\d+)/);
+  if (!m) return -1;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : -1;
+};
+
+const getHeaderTokensFromHtml = (html: string) => {
+  const out: string[] = [];
+  const src = String(html || '');
+  if (!src) return out;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(src, 'text/html');
+  const table = doc.querySelector('table');
+  if (!table) return out;
+  const headerRow = table.querySelector('tr');
+  if (!headerRow) return out;
+  const cells = Array.from(headerRow.querySelectorAll('th, td'));
+  for (const td of cells) {
+    const token = compactCellText(td.textContent || '');
+    if (token) out.push(token);
+  }
+  return out;
+};
+
+const headerSimilarity = (a: string[], b: string[]) => {
+  const aa = a.filter(Boolean);
+  const bb = b.filter(Boolean);
+  const minLen = Math.min(aa.length, bb.length);
+  if (minLen === 0) return 0;
+  const setB = new Set(bb);
+  let hit = 0;
+  for (const t of aa) if (setB.has(t)) hit++;
+  return hit / minLen;
+};
+
+const getTableFragmentIds = (tableId: string) => {
+  const primary = String(tableId || '');
+  if (!primary) return [];
+  if (!props.contentTables) return [primary];
+
+  const ids: string[] = [primary];
+  let cur = primary;
+
+  for (let i = 0; i < 6; i++) {
+    const n = parseTableIdNumber(cur);
+    if (n <= 0) break;
+    const prev = `m_table_${n - 1}`;
+    const curData = props.contentTables[cur];
+    const prevData = props.contentTables[prev];
+    if (!curData || !prevData) break;
+    if (typeof curData.page_idx !== 'number' || typeof prevData.page_idx !== 'number') break;
+    if (prevData.page_idx !== curData.page_idx - 1) break;
+    const s = headerSimilarity(getHeaderTokensFromHtml(String(prevData.html || '')), getHeaderTokensFromHtml(String(curData.html || '')));
+    if (s < 0.6) break;
+    ids.push(prev);
+    cur = prev;
+  }
+
+  return ids;
+};
+
 const isTableBlock = (index: number) => {
   const block = mdBlocks.value[index];
   return block && block.trim().toLowerCase().startsWith('<table');
+};
+
+const isValidBbox = (bbox: any): bbox is [number, number, number, number] => {
+  return Array.isArray(bbox) && bbox.length === 4 && bbox.every((n: any) => typeof n === 'number' && Number.isFinite(n));
+};
+
+const tryParseBbox = (s?: string) => {
+  if (!s) return null;
+  try {
+    const v = JSON.parse(s);
+    return isValidBbox(v) ? v : null;
+  } catch {
+    return null;
+  }
+};
+
+const mergeBbox = (a: [number, number, number, number], b: [number, number, number, number]) => {
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])] as [number, number, number, number];
+};
+
+const bindCellBbox = (domCell: HTMLTableCellElement, bbox: any, pageIdx: any) => {
+  if (!isValidBbox(bbox)) return;
+
+  const newPage = typeof pageIdx === 'number' && Number.isFinite(pageIdx) ? pageIdx : null;
+  const existingPage = domCell.dataset.pageIdx && Number.isFinite(Number(domCell.dataset.pageIdx)) ? Number(domCell.dataset.pageIdx) : null;
+
+  if (domCell.dataset.bbox) {
+    const oldBbox = tryParseBbox(domCell.dataset.bbox);
+    if (oldBbox) {
+      if (existingPage !== null && newPage !== null && existingPage !== newPage) return;
+      const merged = mergeBbox(oldBbox, bbox);
+      domCell.dataset.bbox = JSON.stringify(merged);
+      if (existingPage === null && newPage !== null) domCell.dataset.pageIdx = String(newPage);
+      return;
+    }
+  }
+
+  domCell.dataset.bbox = JSON.stringify(bbox);
+  if (newPage !== null && !domCell.dataset.pageIdx) domCell.dataset.pageIdx = String(newPage);
+};
+
+const findCellCovering = (cells: any[], row: number, col: number) => {
+  return cells.find((cellDatum: any) => {
+    const { r, c, rowSpan, colSpan } = getCellRCSpan(cellDatum);
+    if (r === -1 || c === -1) return false;
+    return row >= r && row < r + rowSpan && col >= c && col < c + colSpan;
+  });
 };
 
 /**
@@ -300,6 +627,7 @@ const handleMdBlockClick = (mdIndex: number, event: MouseEvent) => {
   if (!item) return;
 
   let targetBbox = item.bbox;
+  let targetPageIdx = item.page_idx;
 
   if (item.type === 'table' && props.contentTables && props.contentTables[item.id]) {
     const target = event.target as HTMLElement;
@@ -307,81 +635,48 @@ const handleMdBlockClick = (mdIndex: number, event: MouseEvent) => {
     const table = target.closest('table') as HTMLTableElement;
 
     if (cell && table) {
-      // Calculate logical row/column indices, accounting for merged cells (rowspan/colspan)
-      let logicalRow = -1;
-      let logicalCol = -1;
-      
-      const matrix: number[][] = [];
-      const rows = table.rows;
-      
-      for (let r = 0; r < rows.length; r++) {
-        if (!matrix[r]) matrix[r] = [];
-        const currentRow = rows[r];
-        if (!currentRow) continue;
-        
-        const rowCells = currentRow.cells;
-        let cIndex = 0; // Track actual cell index within the current row
-        
-        for (let c = 0; ; c++) {
-          // Skip cells already occupied by a rowspan from above
-          const currentRowMatrix = matrix[r];
-          while (currentRowMatrix && currentRowMatrix[c] === 1) c++;
-          
-          if (cIndex >= rowCells.length) break;
-          
-          const currentCell = rowCells[cIndex];
-          if (!currentCell) break;
-          
-          // Identify the clicked cell in our logical matrix
-          if (currentCell === cell) {
-            logicalRow = r;
-            logicalCol = c;
-            break;
-          }
-          
-          // Mark the space occupied by the current cell in the matrix
-          const rowSpan = currentCell.rowSpan || 1;
-          const colSpan = currentCell.colSpan || 1;
-          
-          for (let rs = 0; rs < rowSpan; rs++) {
-            for (let cs = 0; cs < colSpan; cs++) {
-              if (!matrix[r + rs]) matrix[r + rs] = [];
-              const targetRow = matrix[r + rs];
-              if (targetRow) {
-                targetRow[c + cs] = 1;
-              }
-            }
-          }
-          
-          cIndex++;
-        }
-        if (logicalRow !== -1) break;
+      let hasDatasetTarget = false;
+      const bbox = tryParseBbox(cell.dataset.bbox);
+      const dsPageIdx = cell.dataset.pageIdx;
+      const pageIdx = dsPageIdx && Number.isFinite(Number(dsPageIdx)) ? Number(dsPageIdx) : null;
+      if (bbox && pageIdx !== null) {
+        targetBbox = bbox;
+        targetPageIdx = pageIdx;
+        hasDatasetTarget = true;
       }
 
-      if (logicalRow !== -1 && logicalCol !== -1) {
-        const tableData = props.contentTables[item.id];
-        const cellData = tableData.cells.find((c: any) =>
-          (c.r === logicalRow && c.c === logicalCol) || (c.row === logicalRow && c.col === logicalCol)
-        );
+      const { posByCell } = buildTableGrid(table);
+      const pos = posByCell.get(cell);
+      const logicalRow = pos?.r ?? -1;
+      const logicalCol = pos?.c ?? -1;
 
-        if (cellData) {
-          if (cellData.bbox) targetBbox = cellData.bbox;
-          // Use cell-specific page_idx for multi-page tables
-          if (typeof cellData.page_idx === 'number') {
-            item.page_idx = cellData.page_idx;
+      if (!hasDatasetTarget && logicalRow !== -1 && logicalCol !== -1) {
+        const fragmentIds = getTableFragmentIds(item.id);
+        for (const fid of fragmentIds) {
+          const tableData = props.contentTables?.[fid];
+          if (!tableData) continue;
+          const cells = Array.isArray(tableData?.cells) ? tableData.cells : [];
+          const align = getTableAlignment(fid, table, tableData);
+          const targetRow = logicalRow + align.rowOffset;
+          const targetCol = logicalCol + align.colOffset;
+          const cellData = findCellCovering(cells, targetRow, targetCol);
+          if (cellData) {
+            if (cellData.bbox) targetBbox = cellData.bbox;
+            if (typeof cellData.page_idx === 'number') targetPageIdx = cellData.page_idx;
+            break;
           }
         }
       }
     }
   }
 
-  if (!targetBbox || typeof item.page_idx !== 'number') return;
+  if (!targetBbox || typeof targetPageIdx !== 'number') return;
 
   const scrollArea = (event.currentTarget as HTMLElement).closest('.md-scroll-area');
   const visualY = event.clientY - (scrollArea?.getBoundingClientRect().top || 0);
 
   emit('element-click', {
-    page_idx: item.page_idx,
+    page_idx: targetPageIdx,
     bbox: targetBbox,
     clickY: visualY
   });
@@ -404,51 +699,10 @@ const handleMdBlockDblClick = (mdIndex: number, event: MouseEvent) => {
   if (cell && table) {
     // If double-clicking a cell, let's try to edit just the cell content for simplicity
     // Calculate logical row/col to identify the cell later during save
-    let logicalRow = -1;
-    let logicalCol = -1;
-    const matrix: number[][] = [];
-    const rows = table.rows;
-    
-    for (let r = 0; r < rows.length; r++) {
-      if (!matrix[r]) matrix[r] = [];
-      const currentRow = rows[r];
-      if (!currentRow) continue;
-      
-      const rowCells = currentRow.cells;
-      let cIndex = 0;
-      for (let c = 0; ; c++) {
-        const rowMatrix = matrix[r];
-        if (rowMatrix) {
-          while (rowMatrix[c] === 1) c++;
-        }
-        
-        if (cIndex >= rowCells.length) break;
-        const currentCell = rowCells[cIndex];
-        if (!currentCell) {
-          cIndex++;
-          continue;
-        }
-        
-        if (currentCell === cell) {
-          logicalRow = r;
-          logicalCol = c;
-          break;
-        }
-        const rowSpan = currentCell.rowSpan || 1;
-        const colSpan = currentCell.colSpan || 1;
-        for (let rs = 0; rs < rowSpan; rs++) {
-          for (let cs = 0; cs < colSpan; cs++) {
-            if (!matrix[r + rs]) matrix[r + rs] = [];
-            const targetRow = matrix[r + rs];
-            if (targetRow) {
-              targetRow[c + cs] = 1;
-            }
-          }
-        }
-        cIndex++;
-      }
-      if (logicalRow !== -1) break;
-    }
+    const { posByCell } = buildTableGrid(table);
+    const pos = posByCell.get(cell);
+    const logicalRow = pos?.r ?? -1;
+    const logicalCol = pos?.c ?? -1;
 
     if (logicalRow !== -1 && logicalCol !== -1) {
       editingCellInfo.value = { 
@@ -551,6 +805,8 @@ const saveBlockEdit = () => {
 const updateTableHighlights = () => {
   if (!containerRef.value) return;
 
+  tableAlignmentCache.clear();
+
   const blocks = containerRef.value.querySelectorAll('.md-block');
   blocks.forEach((block, index) => {
     const item = contentByMdIndex.value.get(index);
@@ -559,78 +815,61 @@ const updateTableHighlights = () => {
     const table = block.querySelector('table') as HTMLTableElement;
     if (!table) return;
 
-    const tableData = props.contentTables[item.id];
-    const matrix: HTMLTableCellElement[][] = [];
-    const rows = table.rows;
+    const { grid, posByCell } = buildTableGrid(table);
+    const allCells = table.querySelectorAll('td, th');
+    allCells.forEach((c) => {
+      c.classList.remove('cell-highlight');
+      c.classList.remove('cell-highlight-raw');
+      c.removeAttribute('data-bbox');
+      c.removeAttribute('data-page-idx');
+      c.removeAttribute('data-grid-r');
+      c.removeAttribute('data-grid-c');
+    });
+    posByCell.forEach((pos, domCell) => {
+      domCell.dataset.gridR = String(pos.r);
+      domCell.dataset.gridC = String(pos.c);
+    });
 
-    // Construct a matrix of DOM elements to resolve rowspan/colspan layouts
-    for (let r = 0; r < rows.length; r++) {
-      if (!matrix[r]) matrix[r] = [];
-      const currentRow = rows[r];
-      if (!currentRow) continue;
-      
-      const rowCells = currentRow.cells;
-      let cIndex = 0;
+    const fragmentIds = getTableFragmentIds(item.id);
+    for (const fid of fragmentIds) {
+      const tableData = props.contentTables[fid];
+      if (!tableData) continue;
 
-      for (let c = 0; ; c++) {
-        const currentRowMatrix = matrix[r];
-        if (currentRowMatrix && currentRowMatrix[c]) {
-          c++;
-          continue;
-        }
+      const align = getTableAlignment(fid, table, tableData);
+      const cells = Array.isArray(tableData?.cells) ? tableData.cells : [];
 
-        if (cIndex >= rowCells.length) break;
-        
-        const cell = rowCells[cIndex];
-        if (!cell) break;
-        
-        const rowSpan = cell.rowSpan || 1;
-        const colSpan = cell.colSpan || 1;
+      cells.forEach((cellData: any) => {
+        const { r, c } = getCellRCSpan(cellData);
+        if (r === -1 || c === -1) return;
 
-        for (let rs = 0; rs < rowSpan; rs++) {
-          const matrixRowIdx = r + rs;
-          if (!matrix[matrixRowIdx]) matrix[matrixRowIdx] = [];
-          const matrixRow = matrix[matrixRowIdx];
-          
-          for (let cs = 0; cs < colSpan; cs++) {
-            if (matrixRow) {
-              matrixRow[c + cs] = cell;
-            }
-          }
-        }
-        cIndex++;
-      }
-    }
+        const dr = r - align.rowOffset;
+        const dc = c - align.colOffset;
+        const domCell = grid[dr]?.[dc];
+        if (!domCell) return;
 
-    // Apply highlights and bind bbox data to dataset attributes
-    if (tableData.cells) {
-      tableData.cells.forEach((cellData: any) => {
-        const r = cellData.r !== undefined ? cellData.r : cellData.row;
-        const c = cellData.c !== undefined ? cellData.c : cellData.col;
-        
-        const rowData = matrix[r];
-        if (rowData && rowData[c]) {
-          const domCell = rowData[c];
-          
-          // Store bbox coordinates in data-bbox attribute for tooltip access
-          if (cellData.bbox) {
-            domCell.dataset.bbox = JSON.stringify(cellData.bbox);
-          }
+        bindCellBbox(domCell, cellData.bbox, cellData.page_idx);
+      });
 
-          // Toggle highlight CSS class based on global state
-          if (props.isHighlightAll && cellData.bbox) {
-            domCell.classList.add('cell-highlight');
-          } else {
-            domCell.classList.remove('cell-highlight');
-          }
-        }
+      posByCell.forEach((pos, domCell) => {
+        if (domCell.dataset.bbox) return;
+        const targetRow = pos.r + align.rowOffset;
+        const targetCol = pos.c + align.colOffset;
+        const cellData = findCellCovering(cells, targetRow, targetCol);
+        if (!cellData) return;
+        bindCellBbox(domCell, cellData.bbox, cellData.page_idx);
       });
     }
+
+    allCells.forEach((c) => {
+      const hasBbox = !!c.getAttribute('data-bbox');
+      if (props.isHighlightAll && hasBbox) c.classList.add('cell-highlight');
+      if (props.isRawVisible && hasBbox) c.classList.add('cell-highlight-raw');
+    });
   });
 };
 
 // Re-calculate table highlights when content or state changes
-watch([() => props.isHighlightAll, () => mdContent.value], () => {
+watch([() => props.isHighlightAll, () => props.isRawVisible, () => props.contentTables, () => mdContent.value], () => {
   nextTick(updateTableHighlights);
 });
 
@@ -700,11 +939,6 @@ const downloadMd = () => {
   transition: all 0.3s ease;
 }
 
-.save-btn, .save-btn:hover, .save-btn:focus {
-  background: #1890ff !important;
-  color: white !important;
-}
-
 .md-md {
   padding: 8px 16px;
   cursor: pointer;
@@ -720,6 +954,18 @@ const downloadMd = () => {
 .highlight-mapped {
   background-color: rgba(255, 0, 0, 0.1); /* Light red background */
   border: 1px solid red; /* Solid red border */
+  transition: all 0.3s ease;
+}
+
+.highlight-raw-mapped {
+  background-color: rgba(24, 144, 255, 0.12);
+  border: 1px solid #1890ff;
+  transition: all 0.3s ease;
+}
+
+:deep(.cell-highlight-raw) {
+  background-color: rgba(24, 144, 255, 0.18) !important;
+  border: 1.5px solid #1890ff !important;
   transition: all 0.3s ease;
 }
 
@@ -831,8 +1077,8 @@ const downloadMd = () => {
 }
 
 :deep(.cell-highlight) {
-  background-color: rgba(255, 0, 0, 0.1) !important;
-  border: 1px solid red !important;
+  background-color: rgba(255, 0, 0, 0.2) !important;
+  border: 1.5px solid red !important;
   transition: all 0.3s ease;
 }
 
@@ -852,6 +1098,26 @@ const downloadMd = () => {
 
 .md-block:active {
   background-color: rgba(0, 123, 255, 0.1);
+}
+
+/* Edit hint in the top-right corner on hover */
+.md-block:hover::after,
+:deep(td:hover::after),
+:deep(th:hover::after) {
+  content: var(--edit-hint);
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 11px;
+  color: #1890ff;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e6f7ff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0.9;
 }
 
 .md-heading {
@@ -934,15 +1200,6 @@ p {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-}
-
-.convert-prompt .hint-text {
-  color: #8c8c8c;
-  font-size: 14px;
-}
-
-.fallback-content {
-  color: #666;
 }
 
 /* Custom scrollbar styling for Markdown area */

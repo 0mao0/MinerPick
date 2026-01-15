@@ -59,6 +59,33 @@
                 <a-button type="text" size="small" @click="pdfScale = Math.max(0.5, pdfScale - 0.1)">
                   <template #icon><MinusOutlined /></template>
                 </a-button>
+                <a-divider type="vertical" />
+                <a-tooltip :title="isRawVisible ? t('app.hide_raw') : t('app.show_raw')">
+                  <a-button 
+                    type="text" 
+                    size="small" 
+                    @click="isRawVisible = !isRawVisible"
+                    :class="{ 'btn-active-blue': isRawVisible }"
+                  >
+                    <template #icon>
+                      <EyeOutlined v-if="isRawVisible" :style="{ color: '#1890ff' }" />
+                      <EyeInvisibleOutlined v-else />
+                    </template>
+                  </a-button>
+                </a-tooltip>
+                <a-tooltip :title="isHighlightAll ? t('app.hide_modified') : t('app.show_modified')">
+                  <a-button 
+                    type="text" 
+                    size="small" 
+                    @click="isHighlightAll = !isHighlightAll"
+                    :class="{ 'btn-active-red': isHighlightAll }"
+                  >
+                    <template #icon>
+                      <EyeOutlined v-if="isHighlightAll" :style="{ color: '#ff4d4f' }" />
+                      <EyeInvisibleOutlined v-else />
+                    </template>
+                  </a-button>
+                </a-tooltip>
               </a-space>
             </div>
 
@@ -102,7 +129,9 @@
               :highlights="currentHighlights" 
               :preferredY="preferredY"
               :is-highlight-all="isHighlightAll"
+              :is-raw-visible="isRawVisible"
               :content-list="contentList"
+              :raw-content-list="rawContentList"
             />
           </div>
         </div>
@@ -136,13 +165,82 @@
               :content-list="contentList"
               :content-tables="contentTables"
               :is-highlight-all="isHighlightAll"
+              :is-raw-visible="isRawVisible"
               v-model:provider="selectedProvider"
               @convert="startConversion"
               @element-click="handleElementClick"
               @toggle-highlight-all="isHighlightAll = !isHighlightAll"
+              @toggle-raw-visible="isRawVisible = !isRawVisible"
             />
+            <div v-else-if="activeTab === 'main'" class="main-extract-wrapper">
+              <div v-if="!mdContent" class="empty-state">
+                <a-empty :description="t('viewer.upload_hint')" />
+              </div>
+              <div v-else class="main-extract-scroll">
+                <div class="main-extract-config" v-if="!mainExtractCollapsed">
+                  <a-form layout="vertical">
+                    <a-form-item :label="t('extract.prompt')">
+                      <a-textarea
+                        v-model:value="mainExtractPrompt"
+                        :auto-size="{ minRows: 3, maxRows: 8 }"
+                      />
+                    </a-form-item>
+                    <a-form-item :label="t('extract.regex')">
+                      <a-input v-model:value="mainExtractRegex" />
+                    </a-form-item>
+                    <a-form-item :label="t('extract.flags')">
+                      <a-input v-model:value="mainExtractFlags" />
+                    </a-form-item>
+                  </a-form>
+                  <a-space>
+                    <a-button type="primary" :loading="isMainExtracting" @click="runMainExtraction">
+                      {{ t('extract.run') }}
+                    </a-button>
+                    <a-button @click="resetMainExtraction">
+                      {{ t('extract.reset') }}
+                    </a-button>
+                  </a-space>
+                </div>
+
+                <div class="main-extract-collapsed" v-else>
+                  <a-space>
+                    <a-button type="link" @click="mainExtractCollapsed = false">
+                      {{ t('extract.edit_prompt') }}
+                    </a-button>
+                    <span class="main-extract-summary">
+                      {{ t('extract.found', { count: mainExtractResults.length }) }}
+                    </span>
+                  </a-space>
+                </div>
+
+                <div class="main-extract-results">
+                  <a-list
+                    :data-source="mainExtractResults"
+                    :locale="{ emptyText: t('extract.empty') }"
+                    size="small"
+                    bordered
+                  >
+                    <template #renderItem="{ item }">
+                      <a-list-item class="extract-item" @click="handleExtractItemClick(item)">
+                        <a-space style="width: 100%" align="center" :wrap="false">
+                          <span class="extract-item-text">{{ item.text }}</span>
+                          <span class="extract-item-meta">
+                            <template v-if="typeof item.page_idx === 'number' && item.bbox">
+                              p{{ item.page_idx + 1 }}
+                            </template>
+                            <template v-else>
+                              {{ t('extract.unmapped') }}
+                            </template>
+                          </span>
+                        </a-space>
+                      </a-list-item>
+                    </template>
+                  </a-list>
+                </div>
+              </div>
+            </div>
             <div v-else class="empty-state">
-              <a-empty :description="activeTab === 'main' ? t('messages.main_content_dev') : t('messages.ai_feature_dev')" />
+              <a-empty :description="t('messages.ai_feature_dev')" />
             </div>
           </div>
         </div>
@@ -171,8 +269,15 @@
         <a-form-item :label="t('settings.mineru_api_key')">
           <a-input-password 
             v-model:value="mineruApiKey" 
-            :placeholder="t('settings.mineru_api_key_placeholder')" 
+            :visibility-toggle="false"
+            :placeholder="serverConfig?.has_mineru_api_key ? t('settings.using_server_key') : t('settings.mineru_api_key_placeholder')" 
           />
+          <div v-if="!mineruApiKey && serverConfig?.has_mineru_api_key" style="margin-top: 4px; font-size: 12px; color: #52c41a;">
+            <span role="img" aria-label="check-circle" class="anticon anticon-check-circle">
+              <svg focusable="false" data-icon="check-circle" width="1em" height="1em" fill="currentColor" aria-hidden="true" viewBox="64 64 896 896"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm193.5 301.7l-210.6 292a31.8 31.8 0 01-51.7 0L318.5 484.9c-3.8-5.3 0-12.7 6.5-12.7h46.9c10.2 0 19.9 4.9 25.9 13.3l71.2 98.8 157.2-218c6-8.3 15.6-13.3 25.9-13.3H699c6.5 0 10.3 7.4 6.5 12.7z"></path></svg>
+            </span>
+            {{ t('settings.server_key_active') }}
+          </div>
         </a-form-item>
         <p style="color: #666; font-size: 12px;">{{ t('settings.save_hint') }}</p>
       </a-form>
@@ -182,6 +287,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import axios from 'axios';
 import { useI18n } from 'vue-i18n';
 import { message } from 'ant-design-vue';
 import { 
@@ -194,7 +300,9 @@ import {
   GithubOutlined,
   GlobalOutlined,
   SettingOutlined,
-  BuildOutlined
+  BuildOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined
 } from '@ant-design/icons-vue';
 import PdfViewer from './components/PdfViewer.vue';
 import MarkdownViewer from './components/MarkdownViewer.vue';
@@ -216,10 +324,39 @@ const { leftWidth, isResizing, startResizing } = useResizer(50);
 const showSettings = ref(false);
 const mineruApiUrl = ref('');
 const mineruApiKey = ref('');
+const serverConfig = ref<{
+  mineru_api_url: string;
+  has_mineru_api_key: boolean;
+  mineru_api_key_masked: string;
+} | null>(null);
 
-onMounted(() => {
+onMounted(async () => {
+  // 1. Load from local storage first
   mineruApiUrl.value = localStorage.getItem('mineru_api_url') || '';
   mineruApiKey.value = localStorage.getItem('mineru_api_key') || '';
+  
+  // 2. Fetch server defaults
+  try {
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+    const res = await axios.get(`${apiBaseUrl}/api/config`);
+    serverConfig.value = res.data;
+    
+    // 3. If local storage is empty, pre-fill with server defaults (logic as requested)
+    if (!mineruApiUrl.value && serverConfig.value?.mineru_api_url) {
+      mineruApiUrl.value = serverConfig.value.mineru_api_url;
+      localStorage.setItem('mineru_api_url', mineruApiUrl.value);
+    }
+    
+    // Note: We don't fill the MASKED key into the real API key field 
+    // to avoid saving asterisks as the actual key.
+    // But if local is empty and server has one, we can show a placeholder or "Server Default"
+    if (!mineruApiKey.value && serverConfig.value?.has_mineru_api_key) {
+      // We don't save the masked key to localStorage, 
+      // instead we let the conversion logic know to use the server key if local is empty.
+    }
+  } catch (err) {
+    console.error('Failed to fetch server config:', err);
+  }
 });
 
 const saveSettings = () => {
@@ -230,10 +367,11 @@ const saveSettings = () => {
 };
 
 const resetSettings = () => {
-  mineruApiUrl.value = '';
+  mineruApiUrl.value = serverConfig.value?.mineru_api_url || '';
   mineruApiKey.value = '';
   localStorage.removeItem('mineru_api_url');
   localStorage.removeItem('mineru_api_key');
+  message.success(t('settings.reset_success') || 'Settings reset');
 };
 
 const {
@@ -241,6 +379,7 @@ const {
   pdfUrl,
   mdContent,
   contentList,
+  rawContentList,
   contentTables,
   currentHighlights,
   isUploading,
@@ -253,7 +392,8 @@ const {
   apiBaseUrl
 } = useConversion();
 
-const isHighlightAll = ref(true); // Default to highlight all enabled
+const isHighlightAll = ref(true); // Default to highlight all enabled (Modified - Red)
+const isRawVisible = ref(false); // New: highlight all original content_list blocks (Raw - Blue)
 const mdLengthK = computed(() => {
   if (!mdContent.value) return 0;
   // Format content length in KB (1024 bytes per unit)
@@ -275,6 +415,138 @@ const handleElementClick = (data: { page_idx: number; bbox: number[]; clickY: nu
     page_idx: data.page_idx
   }];
   preferredY.value = data.clickY;
+};
+
+type ExtractResultItem = {
+  id: string;
+  text: string;
+  md_index?: number;
+  page_idx?: number;
+  bbox?: number[];
+};
+
+const mainExtractPrompt = ref('提取章节标题（支持自定义正则）');
+const mainExtractRegex = ref('^(#{1,6})\\s+(.+)$');
+const mainExtractFlags = ref('gm');
+const mainExtractCollapsed = ref(false);
+const isMainExtracting = ref(false);
+const mainExtractResults = ref<ExtractResultItem[]>([]);
+
+const splitMarkdownBlocks = (input: string) => {
+  const src = (input || '').replace(/\r\n/g, '\n').trim();
+  if (!src) return [];
+
+  const tableRe = /<table[\s\S]*?<\/table>/gi;
+  const blocks: string[] = [];
+
+  let lastEnd = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tableRe.exec(src)) !== null) {
+    const index = match.index;
+    const before = src.slice(lastEnd, index);
+
+    if (before.trim()) {
+      const subBlocks = before
+        .split(/\n{2,}/g)
+        .map(s => s.trim())
+        .filter(Boolean);
+      blocks.push(...subBlocks);
+    }
+
+    const tableBlock = match[0];
+    if (tableBlock && tableBlock.trim()) {
+      blocks.push(tableBlock.trim());
+    }
+    lastEnd = index + tableBlock.length;
+  }
+
+  const tail = src.slice(lastEnd);
+  if (tail.trim()) {
+    const subBlocks = tail
+      .split(/\n{2,}/g)
+      .map(s => s.trim())
+      .filter(Boolean);
+    blocks.push(...subBlocks);
+  }
+
+  return blocks;
+};
+
+const contentByMdIndex = computed(() => {
+  const map = new Map<number, any>();
+  for (const item of contentList.value || []) {
+    if (item && typeof item.md_index === 'number') {
+      map.set(item.md_index, item);
+    }
+  }
+  return map;
+});
+
+const normalizeFlags = (flags: string) => {
+  const raw = (flags || '').trim();
+  const set = new Set<string>();
+  for (const ch of raw) set.add(ch);
+  set.add('g');
+  set.add('m');
+  return Array.from(set).join('');
+};
+
+const runMainExtraction = () => {
+  if (!mdContent.value) {
+    message.warning(t('viewer.upload_hint'));
+    return;
+  }
+
+  isMainExtracting.value = true;
+  try {
+    const flags = normalizeFlags(mainExtractFlags.value);
+    const re = new RegExp(mainExtractRegex.value, flags);
+    const blocks = splitMarkdownBlocks(mdContent.value);
+
+    const results: ExtractResultItem[] = [];
+    const seen = new Set<string>();
+
+    blocks.forEach((block, mdIndex) => {
+      for (const m of block.matchAll(re)) {
+        const text = (m[2] || m[1] || m[0] || '').toString().trim();
+        if (!text) continue;
+        const key = `${mdIndex}:${text}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const mapped = contentByMdIndex.value.get(mdIndex);
+        results.push({
+          id: `${mdIndex}-${results.length}`,
+          text,
+          md_index: mdIndex,
+          page_idx: mapped?.page_idx,
+          bbox: mapped?.bbox
+        });
+      }
+    });
+
+    mainExtractResults.value = results;
+    mainExtractCollapsed.value = true;
+  } catch (e: any) {
+    message.error(t('extract.invalid_regex'));
+  } finally {
+    isMainExtracting.value = false;
+  }
+};
+
+const resetMainExtraction = () => {
+  mainExtractResults.value = [];
+  mainExtractCollapsed.value = false;
+};
+
+const handleExtractItemClick = (item: ExtractResultItem) => {
+  if (typeof item.page_idx !== 'number' || !item.bbox) return;
+  handleElementClick({
+    page_idx: item.page_idx,
+    bbox: item.bbox,
+    clickY: 0
+  });
 };
 </script>
 
@@ -456,6 +728,58 @@ html, body, #app {
   justify-content: center;
 }
 
+.main-extract-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main-extract-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.main-extract-config {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.main-extract-collapsed {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.main-extract-summary {
+  color: #666;
+  font-size: 13px;
+}
+
+.main-extract-results {
+  margin-top: 12px;
+}
+
+.extract-item {
+  cursor: pointer;
+}
+
+.extract-item-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extract-item-meta {
+  color: #999;
+  font-size: 12px;
+}
+
 .header-left {
   display: flex;
   align-items: center;
@@ -474,6 +798,16 @@ html, body, #app {
   font-size: 13px;
   min-width: 45px;
   text-align: center;
+}
+
+.btn-active-blue {
+  color: #1890ff !important;
+  background-color: rgba(24, 144, 255, 0.1) !important;
+}
+
+.btn-active-red {
+  color: #ff4d4f !important;
+  background-color: rgba(255, 77, 79, 0.1) !important;
 }
 
 .upload-area {

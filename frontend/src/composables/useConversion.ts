@@ -9,6 +9,7 @@ export function useConversion() {
   const pdfUrl = ref('');
   const mdContent = ref('');
   const contentList = ref<any[]>([]);
+  const rawContentList = ref<any[]>([]);
   const contentTables = ref<Record<string, any>>({});
   const currentHighlights = ref<any[]>([]);
   const isUploading = ref(false);
@@ -16,7 +17,7 @@ export function useConversion() {
   const uploadStatusText = ref('');
   const pendingFile = ref<any>(null);
   const selectedProvider = ref('mineru');
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002';
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
 
   const handleUploadChange = async (info: any) => {
     if (info.file.status === 'uploading') {
@@ -65,7 +66,35 @@ export function useConversion() {
     }
     
     try {
-      // Timers for updating progress messages during long-running conversion
+      // Check if MinerU is configured if it's the selected provider
+      if (selectedProvider.value === 'mineru') {
+        const localUrl = localStorage.getItem('mineru_api_url');
+        const localKey = localStorage.getItem('mineru_api_key');
+        
+        // If local is missing, check server
+        if (!localUrl || !localKey) {
+          try {
+            const configRes = await axios.get(`${apiBaseUrl}/api/config`);
+            const hasUrl = localUrl || configRes.data.mineru_api_url;
+            const hasKey = localKey || configRes.data.has_mineru_api_key;
+            
+            if (!hasUrl || !hasKey) {
+              message.warning(t('messages.mineru_not_configured'));
+              isProcessing.value = false;
+              return;
+            }
+          } catch (e) {
+            // If config check fails and local is missing, we must warn
+            if (!localUrl || !localKey) {
+              message.warning(t('messages.mineru_not_configured'));
+              isProcessing.value = false;
+              return;
+            }
+          }
+        }
+      }
+
+      // Timers for updating progress messages
       const timers: any[] = [];
       timers.push(setTimeout(() => {
         if (isProcessing.value) uploadStatusText.value = t('messages.extracting_layout');
@@ -75,16 +104,20 @@ export function useConversion() {
         if (isProcessing.value) uploadStatusText.value = t('messages.converting_markdown');
       }, 10000));
       
+      // Add MinerU config if provided in settings, otherwise backend uses .env
       const mineruApiUrl = localStorage.getItem('mineru_api_url');
       const mineruApiKey = localStorage.getItem('mineru_api_key');
       
-      const convertRes = await axios.post(`${apiBaseUrl}/api/convert`, {
+      const payload: any = {
         task_id: res.task_id,
         filename: res.filename,
-        provider: selectedProvider.value,
-        mineru_api_url: mineruApiUrl || undefined,
-        mineru_api_key: mineruApiKey || undefined
-      });
+        provider: selectedProvider.value
+      };
+      
+      if (mineruApiUrl) payload.mineru_api_url = mineruApiUrl;
+      if (mineruApiKey) payload.mineru_api_key = mineruApiKey;
+
+      const convertRes = await axios.post(`${apiBaseUrl}/api/convert`, payload);
 
       const conversionData = convertRes.data;
       const fetchTasks = [];
@@ -95,6 +128,10 @@ export function useConversion() {
       
       if (conversionData.content_list_url) {
         fetchTasks.push(axios.get(`${apiBaseUrl}${conversionData.content_list_url}`).then(r => ({ type: 'list', data: r.data })));
+      }
+
+      if (conversionData.raw_content_list_url) {
+        fetchTasks.push(axios.get(`${apiBaseUrl}${conversionData.raw_content_list_url}`).then(r => ({ type: 'raw_list', data: r.data })));
       }
 
       if (conversionData.content_tables_url) {
@@ -108,6 +145,7 @@ export function useConversion() {
       // Reset values
       mdContent.value = '';
       contentList.value = [];
+      rawContentList.value = [];
       contentTables.value = {};
 
       results.forEach(res => {
@@ -119,6 +157,15 @@ export function useConversion() {
             contentList.value = data;
           } else if (data && typeof data === 'object') {
             contentList.value = data.content_list || data.data || [];
+          }
+        }
+        else if (res.type === 'raw_list') {
+          let data = res.data;
+          if (typeof data === 'string') data = JSON.parse(data);
+          if (Array.isArray(data)) {
+            rawContentList.value = data;
+          } else if (data && typeof data === 'object') {
+            rawContentList.value = data.content_list || data.data || [];
           }
         }
         else if (res.type === 'tables') {
@@ -152,6 +199,7 @@ export function useConversion() {
     pdfUrl.value = '';
     mdContent.value = '';
     contentList.value = [];
+    rawContentList.value = [];
     contentTables.value = {};
     pendingFile.value = null;
   };
@@ -167,6 +215,7 @@ export function useConversion() {
     pdfUrl,
     mdContent,
     contentList,
+    rawContentList,
     contentTables,
     isUploading,
     isProcessing,

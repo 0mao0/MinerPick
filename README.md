@@ -3,185 +3,149 @@
 [English](#english) | [中文](#chinese)
 
 ---
+<p align="center">
+  <img src="docs/images/product_view.png" width="500px" />
+</p>
 
 <a name="english"></a>
 ## English
 
-**MinerPick** is an intelligent PDF-to-Markdown conversion platform that provides a high-fidelity "mirror" experience. It doesn't just convert text; it bridges the visual gap between your original document and its digital structure.
-
-
-
-### 🌟 Key Features
-
-- **High-Fidelity Conversion**: Powered by **MinerU**, the world-class PDF parsing engine, ensuring accurate extraction of complex layouts, formulas, and tables.
-- **Interactive Synchronization**: Click any element in the Markdown (tables, paragraphs) to instantly highlight and scroll to its original position in the PDF.
-- **Dual-Pane View**: Side-by-side comparison with synchronized scrolling and page tracking.
-- **Smart Table Extraction**: Integrated with **GMFT** (Grid-based Model for Table Extraction) for precise cell-level data recovery.
-- **Developer-First**: Clean FastAPI backend, modular parser architecture, and Vue 3 + Ant Design Vue 4 frontend.
-- **Security & Flexibility**: Support for `.env` configurations and user-defined API settings via the frontend.
-
-### 🚀 Tech Stack
-
-- **Frontend**: Vue 3, Vite, TypeScript, Ant Design Vue 4, Vue-i18n.
-- **Backend**: FastAPI, Pydantic v2, PyMuPDF.
-- **Parsing Engine**: MinerU API (v2.6.4) / Local Parsers.
+**One-liner**: A full-stack PDF ↔ Markdown “mirror” with pixel-level highlighting and editable table cells, designed for LLM workflows.
 
 ### 🛠️ Architecture
 
-#### 1. Backend Parsing Flow
+#### 1) Data Pipeline (Backend)
+- **PDF Upload**: `main.py` -> `input/`
+- **Parsing**: `MinerUParser` (API) -> `content.md` + `content_list.json`- **Table Enrichment**: `GMFTTableExtractor` (`gmft`) -> `content_tables.json` (Cell-level coords)
+- **Mapping**: `_build_md_first_content_list` maps MD blocks to PDF bboxes.
+
 <p align="center">
-  <img src="docs/images/backend_flow.png" width="800px" />
+  <img src="docs/images/backend_flow.png" width="500px" />
 </p>
 
-*The core logic involves MinerU for initial parsing and GMFT for high-precision table cell extraction.*
+#### 2) Interaction Flow (Frontend)
+- **Rendering**: `MarkdownViewer.vue` (MD) + `PdfViewer.vue` (PDF)
+- **Sync**: Hover/Click index -> Lookup JSON -> Emit coordinates -> Render Highlight box.
 
-#### 2. Frontend Highlight Sync
 <p align="center">
-  <img src="docs/images/frontend_sync.png" width="800px" />
+  <img src="docs/images/frontend_sync.png" width="500px" />
 </p>
 
-*Markdown blocks are mapped to PDF coordinates (bbox) via `md_index`, allowing real-time synchronized highlighting.*
+### 🆚 Comparison (vs. similar products)
 
-### 🛠️ Getting Started
+The table below compares MinerPick with other major open-source or commercial products.
 
-#### 1. Prerequisites
-- Python 3.9+
+| Dimension | MinerPick (Target) | MinerU (Magic-PDF) | Marker | Docling | Unstructured / LlamaParse |
+|---|---|---|---|---|---|
+| **Layout Restoration** | ✅ **High** <br>*(Visual + Structural)* | ✅ **High** <br>*(Structural)* | ✅ **High** <br>*(Structural)* | ✅ **High** <br>*(Structural)* | ❌ **Low** <br>*(Chunk-first)* |
+| **Sync Highlighting** | ✅ **Full-stack** <br>*(Ready-to-use UI)* | ⚠️ **Raw Data** <br>*(JSON Bbox available)* | ❌ **None** <br>*(Text-only)* | ⚠️ **Raw Data** <br>*(Granular Bbox)* | ⚠️ **Block-level** <br>*(Element Bbox)* |
+| **Table Coordinates** | ✅ **Cell-level** <br>*(Exact Bbox)* | ⚠️ **Structure** <br>*(HTML/MD Block)* | ❌ **Text-only** <br>*(MD Table)* | ⚠️ **Structure** <br>*(Parsed HTML)* | ⚠️ **Block-level** <br>*(Table Region)* |
+| **Editable Mapping** | ✅ **Native** <br>*(Keep bbox)* | ❌ **No** | ❌ **No** | ❌ **No** | ❌ **No** |
+| **Self-Hostable** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** | ⚠️ **Partial** <br>*(Limited/OSS)* |
+| **API Interface** | ✅ **FastAPI** <br>*(HTTP Service)* | ⚠️ **CLI/SDK** <br>*(Python Lib)* | ❌ **Script** <br>*(Local Tool)* | ⚠️ **Python Lib** <br>*(Local SDK)* | ✅ **API-First** <br>*(Cloud/SaaS)* |
+
+### 🧪 Cases (Coming soon)
+
+- Case studies: **TBD (to be published)**.
+
+### 🌐 Online Demo
+
+- Online demo: **http://124.221.238.70:8005/**.
+
+### ▶️ Usage
+
+#### 1) Prerequisites
+- Python 3.10+
 - Node.js 18+
 
-#### 2. Backend Setup
+#### 2) Backend
 ```bash
-cd backend
 pip install -r requirements.txt
-cp ../.env.example ../.env  # Configure your MinerU API Key in .env
-python main.py
+cp .env.example .env
+python backend/main.py
 ```
 
-#### 3. Frontend Setup
+#### 3) Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### 🔌 API Documentation
-
-The backend provides a set of RESTful APIs that can be used independently of the frontend.
-
-- **Upload PDF**
-  - **Endpoint**: `POST /api/upload`
-  - **Body**: `multipart/form-data` with `file` field.
-  - **Response**: `{"task_id": "...", "filename": "...", "pdf_url": "..."}`
-
-- **Convert PDF**
-  - **Endpoint**: `POST /api/convert`
-  - **Body**: `application/json`
-    ```json
-    {
-      "task_id": "uuid",
-      "filename": "original.pdf",
-      "provider": "mineru" | "pymupdf",
-      "mineru_api_url": "optional_override",
-      "mineru_api_key": "optional_override"
-    }
-    ```
-  - **Response**: `{"task_id": "...", "provider": "...", "md_url": "...", "content_list_url": "...", "content_tables_url": "..."}`
-
-- **Get Results**
-  - Result files are accessible at `/results/{task_id}/{filename}`.
-
-### 🤝 Acknowledgments
-This project is powered by **MinerU** and **gmft**. Special thanks to the open-source community for these incredible tools.
-
-### 📄 License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+#### Notes
+- Built on MinerU and gmft.
 
 ---
 
 <a name="chinese"></a>
 ## 中文
 
-**MinerPick** 是一款智能 PDF 转 Markdown 平台，提供高保真的“镜像”体验。它不仅是文字的转换，更是在原始文档与其数字化结构之间搭建了一座视觉桥梁。
 
-### 🌟 核心特性
 
-- **高保真转换**: 由 **MinerU** 提供动力，这是世界顶级的 PDF 解析引擎，确保复杂布局、公式和表格的准确提取。
-- **交互式同步**: 点击 Markdown 中的任何元素（如表格单元格、段落），即可在 PDF 中瞬间高亮并滚动到其原始位置。
-- **双栏视图**: 左右对比视图，支持同步滚动和页面追踪。
-- **智能表格提取**: 集成 **GMFT** (基于网格的表格提取模型)，实现精确到单元格的数据恢复。
-- **开发者友好**: 简洁的 FastAPI 后端，模块化的解析器架构，以及 Vue 3 + Ant Design Vue 4 前端。
-- **安全与灵活**: 支持 `.env` 环境配置，并允许用户通过前端界面自定义 API 设置。
-
-### 🚀 技术栈
-
-- **前端**: Vue 3, Vite, TypeScript, Ant Design Vue 4, Vue-i18n.
-- **后端**: FastAPI, Pydantic v2, PyMuPDF.
-- **解析引擎**: MinerU API (v2.6.4) / 本地解析器.
+**一句话描述**：面向 LLM 的全栈 PDF ↔ Markdown “镜像”工具，支持像素级高亮对齐与表格单元格编辑。
 
 ### 🛠️ 技术架构
 
-#### 1. 后端解析流程
+#### 1) 数据处理流程 (后端)
+- **PDF 上传**: `main.py` -> 存储至 `input/`
+- **内容解析**: `MinerUParser` (调用 API) -> 生成 `content.md` + `content_list.json`
+- **表格增强**: `GMFTTableExtractor` (`gmft`) -> 提取单元格级坐标 `content_tables.json`
+- **对齐映射**: `_build_md_first_content_list` 算法将 MD 区块与 PDF 坐标进行关联。
+
+#### 2) 同步高亮交互 (前端)
+- **双端渲染**: `MarkdownViewer.vue` (渲染 MD) + `PdfViewer.vue` (渲染 PDF)
+- **交互对齐**: 悬停/点击索引 -> 查询 JSON 映射 -> 发送坐标 -> 在 PDF 上层绘制高亮框。
+
 <p align="center">
-  <img src="docs/images/backend_flow.png" width="800px" />
+  <img src="docs/images/fullstack_framework.png" width="400px" />
 </p>
 
-*核心逻辑：使用 MinerU 进行基础解析，并集成 GMFT 模型实现高精度表格单元格坐标提取。*
 
-#### 2. 前端高亮同步原理
-<p align="center">
-  <img src="docs/images/frontend_sync.png" width="800px" />
-</p>
+### 🆚 同类产品对比
 
-*Markdown 块通过 `md_index` 与 PDF 坐标（bbox）建立映射，实现实时的交互式高亮对齐。*
+下表将 MinerPick 与市场其他主流开源或商业产品进行对比。
 
-### 🛠️ 快速入门
+| 维度 | MinerPick (目标产品) | MinerU (Magic-PDF) | Marker | Docling | Unstructured / LlamaParse |
+|---|---|---|---|---|---|
+| **版面还原能力** | ✅ **高** <br>*(视觉 + 结构)* | ✅ **高** <br>*(结构级)* | ✅ **高** <br>*(结构级)* | ✅ **高** <br>*(结构级)* | ❌ **低** <br>*(分块优先)* |
+| **同步高亮** | ✅ **全栈支持** <br>*(开箱即用 UI)* | ⚠️ **原始数据** <br>*(含 JSON 坐标)* | ❌ **无** <br>*(纯文本)* | ⚠️ **原始数据** <br>*(细粒度坐标)* | ⚠️ **块级** <br>*(元素坐标)* |
+| **表格坐标** | ✅ **单元格级** <br>*(精确 Bbox)* | ⚠️ **结构级** <br>*(HTML/MD 块)* | ❌ **纯文本** <br>*(MD 表格)* | ⚠️ **结构级** <br>*(解析后的 HTML)* | ⚠️ **块级** <br>*(表格区域)* |
+| **可编辑映射** | ✅ **原生支持** <br>*(保留 Bbox)* | ❌ **不支持** | ❌ **不支持** | ❌ **不支持** | ❌ **不支持** |
+| **本地化部署** | ✅ **支持** | ✅ **支持** | ✅ **支持** | ✅ **支持** | ⚠️ **部分支持** <br>*(有限/开源版)* |
+| **API 优先架构** | ✅ **FastAPI** <br>*(HTTP 服务)* | ⚠️ **CLI/SDK** <br>*(Python 库)* | ❌ **脚本** <br>*(本地工具)* | ⚠️ **Python 库** <br>*(本地 SDK)* | ✅ **API 优先** <br>*(云服务/SaaS)* |
 
-#### 1. 环境要求
-- Python 3.9+
+
+### 🧪 案例（待发布）
+
+- 案例集：**待发布**。
+
+### 🌐 在线体验地址
+
+- 在线体验：**http://124.221.238.70:8005/**。
+
+### ▶️ 使用方法
+
+#### 1）环境要求
+- Python 3.10+
 - Node.js 18+
 
-#### 2. 后端设置
+#### 2）启动后端
 ```bash
-cd backend
 pip install -r requirements.txt
-cp ../.env.example ../.env  # 在 .env 中配置您的 MinerU API Key
-python main.py
+cp .env.example .env
+python backend/main.py
 ```
 
-#### 3. 前端设置
+#### 3）启动前端
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### 🔌 API 文档
+#### 说明
+- 本项目基于 MinerU 和 gmft 开发。
 
-后端提供了一套 RESTful API，可以脱离前端独立调用。
+### 📄 License
 
-- **上传 PDF**
-  - **接口**: `POST /api/upload`
-  - **参数**: `multipart/form-data` 表单，包含 `file` 字段。
-  - **返回**: `{"task_id": "...", "filename": "...", "pdf_url": "..."}`
-
-- **转换 PDF**
-  - **接口**: `POST /api/convert`
-  - **参数**: `application/json`
-    ```json
-    {
-      "task_id": "uuid",
-      "filename": "original.pdf",
-      "provider": "mineru" | "pymupdf",
-      "mineru_api_url": "可选覆盖地址",
-      "mineru_api_key": "可选覆盖密钥"
-    }
-    ```
-  - **返回**: `{"task_id": "...", "provider": "...", "md_url": "...", "content_list_url": "...", "content_tables_url": "..."}`
-
-- **获取结果**
-  - 转换后的文件可通过 `/results/{task_id}/{filename}` 访问。
-
-### 🤝 致谢
-本项目由 **MinerU** 和 **gmft** 提供动力。特别感谢开源社区提供的这些出色工具。
-
-### 📄 开源协议
-本项目采用 MIT 协议 - 详情请参阅 [LICENSE](LICENSE) 文件。
+MIT License. See [LICENSE](LICENSE).

@@ -1,4 +1,3 @@
-import os
 from typing import List, Dict, Any
 from gmft.auto import AutoTableFormatter
 from gmft.detectors.base import CroppedTable
@@ -29,7 +28,7 @@ class GMFTTableExtractor:
         Extract cell-level bboxes from a FormattedTable object.
         Uses ft.cells if available (GMFT > 0.3), otherwise falls back to row/col intersection.
         """
-        cells = []
+        primary_cells = []
         
         # 1. Try using ft.cells (most accurate as it reflects GMFT's internal structure)
         if hasattr(ft, 'cells') and ft.cells:
@@ -49,21 +48,42 @@ class GMFTTableExtractor:
                     table_bbox[1] + c_bbox[3]
                 ]
                 
-                cells.append({
-                    "r": cell.row_index if hasattr(cell, 'row_index') else getattr(cell, 'row', 0),
-                    "c": cell.col_index if hasattr(cell, 'col_index') else getattr(cell, 'col', 0),
+                r = cell.row_index if hasattr(cell, 'row_index') else getattr(cell, 'row', 0)
+                c = cell.col_index if hasattr(cell, 'col_index') else getattr(cell, 'col', 0)
+                row_span = getattr(cell, 'row_span', 1) or 1
+                col_span = getattr(cell, 'col_span', 1) or 1
+
+                primary_cells.append({
+                    "r": int(r),
+                    "c": int(c),
+                    "row_span": int(row_span),
+                    "col_span": int(col_span),
                     "is_header": getattr(cell, 'is_header', False), # Some versions might not have this
                     "page_idx": page_idx,
                     "bbox": self._normalize_bbox(abs_box, page_width, page_height)
                 })
-            
-            # If we successfully extracted cells, return them
-            if cells:
-                return cells
+
+        if primary_cells:
+            max_r = -1
+            max_c = -1
+            covered = set()
+            for cd in primary_cells:
+                r = int(cd.get("r", 0) or 0)
+                c = int(cd.get("c", 0) or 0)
+                rs = int(cd.get("row_span", 1) or 1)
+                cs = int(cd.get("col_span", 1) or 1)
+                max_r = max(max_r, r + rs - 1)
+                max_c = max(max_c, c + cs - 1)
+                for rr in range(r, r + rs):
+                    for cc in range(c, c + cs):
+                        covered.add((rr, cc))
+            total = (max_r + 1) * (max_c + 1) if max_r >= 0 and max_c >= 0 else 0
+            if total > 0 and (len(covered) / total) >= 0.9:
+                return primary_cells
 
         # 2. Fallback: Intersect rows and cols from TATR predictions
         if not hasattr(ft, 'predictions') or not hasattr(ft.predictions, 'tatr'):
-            return []
+            return primary_cells or []
         
         tatr = ft.predictions.tatr
         boxes = tatr.get('boxes', [])
@@ -113,7 +133,7 @@ class GMFTTableExtractor:
         rows = deduplicate(rows, 1) # y0
         cols = deduplicate(cols, 0) # x0
         
-        cells = []
+        fallback_cells = []
         for r_idx, r_box in enumerate(rows):
             # Check if this row is a header
             is_header = False
@@ -131,15 +151,35 @@ class GMFTTableExtractor:
                     c_box[2],
                     r_box[3]
                 ]
-                cells.append({
+                fallback_cells.append({
                     "r": r_idx,
                     "c": c_idx,
+                    "row_span": 1,
+                    "col_span": 1,
                     "is_header": is_header,
                     "page_idx": page_idx,
                     "bbox": self._normalize_bbox(cell_bbox_pts, page_width, page_height)
                 })
                 
-        return cells
+        if not primary_cells:
+            return fallback_cells
+
+        covered = set()
+        for cd in primary_cells:
+            r = int(cd.get("r", 0) or 0)
+            c = int(cd.get("c", 0) or 0)
+            rs = int(cd.get("row_span", 1) or 1)
+            cs = int(cd.get("col_span", 1) or 1)
+            for rr in range(r, r + rs):
+                for cc in range(c, c + cs):
+                    covered.add((rr, cc))
+
+        merged = list(primary_cells)
+        for cd in fallback_cells:
+            key = (int(cd.get("r", 0) or 0), int(cd.get("c", 0) or 0))
+            if key not in covered:
+                merged.append(cd)
+        return merged
 
     def extract_tables_from_pdf(self, pdf_path: str, mineru_content_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -197,6 +237,15 @@ class GMFTTableExtractor:
                         # print(f"  [GMFT] Successfully extracted table {m_id} on page {page_idx}")
                     except Exception as fe:
                         # print(f"  [GMFT] Error formatting table {m_id} on page {page_idx}: {fe}")
+                        # Fallback: Create a basic entry with just the table bbox if GMFT fails
+                        # This ensures the table at least has a clickable area (the whole table)
+                        final_content_tables[m_id] = {
+                            "page_idx": page_idx,
+                            "bbox": m_bbox,
+                            "cells": [], # No detailed cells, but table bbox exists
+                            "md": "", # Use raw md if available later
+                            "html": ""
+                        }
                         pass
             
             doc.close()

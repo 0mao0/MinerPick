@@ -5,6 +5,22 @@ import path from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   envDir: '../',
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/inputs': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/results': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      }
+    }
+  },
   plugins: [vue()],
   resolve: {
     alias: {

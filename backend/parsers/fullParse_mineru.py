@@ -2,6 +2,7 @@ import os
 import json
 import httpx
 import re
+from collections import Counter
 from typing import Dict, Any, List, Optional
 from fastapi import HTTPException
 from .base import BaseParser, write_json_file, write_text_file, _coerce_json_value
@@ -40,129 +41,160 @@ class MinerUParser(BaseParser):
     def name(self) -> str:
         return "MinerU"
 
-    def _is_toc_entry(self, text: str) -> bool:
-        """Check if the text looks like a Table of Contents entry."""
+    def _has_cjk(self, text: str) -> bool:
         if not text:
             return False
-        # TOC entries often have many dots or end with a page number preceded by dots/spaces
-        import re
-        if re.search(r'\.{4,}', text):
-            return True
-        if re.search(r'\s+\d+$', text) and len(text) > 10:
-            return True
+        for ch in text:
+            code = ord(ch)
+            if 0x4E00 <= code <= 0x9FFF:
+                return True
         return False
 
-    def _best_anchor_in_window(self, target_text: str, candidates: List[Dict], start_idx: int, window_size: int, is_heading: bool = False, min_page_idx: int = -1) -> Optional[int]:
-        """Find the best matching candidate index within a window."""
-        if not target_text:
-            return None
-        
-        # Debug flag
-        is_debug_text = False
-        
-        target_norm = self._normalize_match_text(target_text)
-        if not target_norm:
-            return None
-
-        best_idx = None
-        best_score = 0
-        
-        end_idx = min(len(candidates), start_idx + window_size)
-        
-        # If it's a heading, we want to avoid matching TOC entries if possible
-        toc_matches = []
-
-        for i in range(start_idx, end_idx):
-            cand = candidates[i]
-            cand_text = cand.get("text", "")
-            cand_norm = self._normalize_match_text(cand_text)
-            
-            if not cand_norm:
+    def _compact_text(self, text: str) -> str:
+        s = (text or "").strip().lower()
+        if not s:
+            return ""
+        s = re.sub(r"\s+", "", s)
+        out = []
+        for ch in s:
+            if ch.isalnum():
+                out.append(ch)
                 continue
-            
-            # Skip if page is backwards (allow same page)
-            cand_page = cand.get("page_idx", -1)
-            if min_page_idx >= 0 and cand_page >= 0 and cand_page < min_page_idx:
-                continue
+            code = ord(ch)
+            if 0x4E00 <= code <= 0x9FFF:
+                out.append(ch)
+        return "".join(out)
 
-            # Use Jaccard-like similarity for better fuzzy matching
-            score = self._calculate_text_similarity(target_norm, cand_norm)
-            
-            # if is_debug_text and score > 0.3:
-            #      print(f"  [DEBUG-MATCH] Candidate: '{cand_text}' (norm: '{cand_norm}') Score: {score:.2f} Page: {cand_page}")
+    def _shingles(self, compact: str, has_cjk: bool) -> set[str]:
+        if not compact:
+            return set()
+        if has_cjk:
+            if len(compact) == 1:
+                return {compact}
+            return {compact[i : i + 2] for i in range(len(compact) - 1)}
+        if len(compact) <= 3:
+            return {compact}
+        return {compact[i : i + 3] for i in range(len(compact) - 2)}
 
-            if score > 0.6:
-                if is_heading and self._is_toc_entry(cand_text):
-                    toc_matches.append((i, score))
-                    continue
-                
-                if score > best_score:
-                    best_score = score
-                    best_idx = i
-                    
-                if score > 0.95: # Early exit for very strong match
-                    break
-        
-        # If no non-TOC match found for a heading, but we found TOC matches, 
-        # only use them if the score is extremely high (rarely the case for real headings)
-        if best_idx is None and toc_matches:
-            # Sort by score descending
-            toc_matches.sort(key=lambda x: x[1], reverse=True)
-            if toc_matches[0][1] > 0.9:
-                return toc_matches[0][0]
-                
-        return best_idx
+    def _prep_text(self, text: str) -> Dict[str, Any]:
+        compact = self._compact_text(text)
+        has_cjk = self._has_cjk(compact)
+        return {
+            "compact": compact,
+            "has_cjk": has_cjk,
+            "shingles": self._shingles(compact, has_cjk),
+            "length": len(compact),
+        }
 
     def _calculate_text_similarity(self, text1: str, text2: str) -> float:
-        """Text similarity with character-level and word-level consideration."""
         if not text1 or not text2:
             return 0.0
-        
-        # Normalize
-        t1 = self._normalize_match_text(text1)
-        t2 = self._normalize_match_text(text2)
-        
-        if not t1 or not t2:
+        p1 = self._prep_text(text1)
+        p2 = self._prep_text(text2)
+        a = p1["compact"]
+        b = p2["compact"]
+        if not a or not b:
             return 0.0
-        
-        if t1 == t2:
-            return 1.2 # Perfect match bonus
-            
-        # 1. Character-level Jaccard
-        s1 = set(t1)
-        s2 = set(t2)
-        intersection = s1.intersection(s2)
-        union = s1.union(s2)
-        if not union: return 0.0
-        jaccard = len(intersection) / len(union)
-        
-        # 2. Length similarity penalty
-        len_ratio = min(len(t1), len(t2)) / max(len(t1), len(t2))
-        
-        # 3. Order consideration (simple)
-        # If one is a substring of the other, it's a strong indicator
-        substring_bonus = 1.0
-        if t1 in t2 or t2 in t1:
-            substring_bonus = 1.2
-        
-        # Combine
-        score = jaccard * len_ratio * substring_bonus
-        
-        # For long strings, be more lenient if they share a lot of words
-        if len(t1) > 10 or len(t2) > 10:
-            # Word-level Jaccard (simple approach: split by 2-char chunks for Chinese)
-            def get_chunks(s): return set([s[i:i+2] for i in range(len(s)-1)])
-            c1 = get_chunks(t1)
-            c2 = get_chunks(t2)
-            if c1 and c2:
-                word_jaccard = len(c1 & c2) / len(c1 | c2)
-                score = max(score, word_jaccard * 1.1)
+        if a == b:
+            return 1.2
 
-        # For very short strings, be more lenient if it's a substring
-        if (len(t1) <= 4 or len(t2) <= 4) and (t1 in t2 or t2 in t1):
+        s1 = p1["shingles"]
+        s2 = p2["shingles"]
+        if not s1 or not s2:
+            return 0.0
+
+        inter = len(s1 & s2)
+        union = len(s1 | s2)
+        jaccard = inter / union if union else 0.0
+        len_ratio = min(len(a), len(b)) / max(len(a), len(b)) if max(len(a), len(b)) else 0.0
+        score = jaccard * (0.5 + 0.5 * len_ratio)
+
+        if (len(a) >= 8 and len(b) >= 8) and (a in b or b in a):
+            score = max(score, 0.9)
+        elif (len(a) <= 4 or len(b) <= 4) and (a in b or b in a):
             score = max(score, 0.7)
-            
+
         return score
+
+    def _merge_bboxes(self, bboxes: List[List[int]]) -> Optional[List[int]]:
+        bxs = [b for b in (bboxes or []) if isinstance(b, list) and len(b) == 4]
+        if not bxs:
+            return None
+        x0 = min(b[0] for b in bxs)
+        y0 = min(b[1] for b in bxs)
+        x1 = max(b[2] for b in bxs)
+        y1 = max(b[3] for b in bxs)
+        return [x0, y0, x1, y1]
+
+    def _choose_dominant_page_and_bbox(self, cands: List[Dict[str, Any]]) -> tuple[Optional[int], Optional[List[int]]]:
+        if not cands:
+            return None, None
+        weights: Counter[int] = Counter()
+        for c in cands:
+            p = c.get("page_idx")
+            if isinstance(p, int) and p >= 0:
+                weights[p] += int(c.get("_text_len") or 0) + 1
+        if not weights:
+            return None, None
+        page_idx = weights.most_common(1)[0][0]
+        bbox = self._merge_bboxes([c.get("bbox") for c in cands if c.get("page_idx") == page_idx])
+        return page_idx, bbox
+
+    def _best_span_match(
+        self,
+        md_prep: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+        window_start: int,
+        window_end: int,
+        max_span: int,
+    ) -> Optional[Dict[str, Any]]:
+        if not md_prep or not md_prep.get("compact"):
+            return None
+        if window_start >= window_end:
+            return None
+
+        target_compact = md_prep["compact"]
+        target_shingles = md_prep["shingles"]
+        if not target_shingles:
+            return None
+
+        best: Optional[Dict[str, Any]] = None
+        for s in range(window_start, window_end):
+            span_compact = ""
+            span_shingles: set[str] = set()
+            span_cands: List[Dict[str, Any]] = []
+            for e in range(s, min(window_end, s + max_span)):
+                cand = candidates[e]
+                span_cands.append(cand)
+                span_compact += cand.get("_compact", "")
+                span_shingles |= cand.get("_shingles", set())
+                if not span_compact or not span_shingles:
+                    continue
+
+                inter = len(target_shingles & span_shingles)
+                union = len(target_shingles | span_shingles)
+                jaccard = inter / union if union else 0.0
+                len_ratio = min(len(target_compact), len(span_compact)) / max(len(target_compact), len(span_compact))
+                score = jaccard * (0.5 + 0.5 * len_ratio)
+
+                if (len(target_compact) >= 8 and len(span_compact) >= 8) and (target_compact in span_compact or span_compact in target_compact):
+                    score = max(score, 0.9)
+
+                span_len_penalty = 0.03 * (e - s)
+                score = score - span_len_penalty
+
+                if best is None or score > best["score"]:
+                    page_idx, bbox = self._choose_dominant_page_and_bbox(span_cands)
+                    best = {
+                        "start": s,
+                        "end": e,
+                        "score": score,
+                        "page_idx": page_idx,
+                        "bbox": bbox,
+                        "cands": list(span_cands),
+                    }
+
+        return best
 
     def _build_md_first_content_list(
         self,
@@ -170,352 +202,195 @@ class MinerUParser(BaseParser):
         raw_content_list: List[Dict[str, Any]],
         content_tables: Optional[Dict[str, Any]] = None,
     ) -> tuple[List[Dict[str, Any]], str]:
+        """
+        Re-engineered strategy (Two-Pass Anchor-Based Alignment):
+        1. Pre-process candidates and blocks.
+        2. Pass 1: Identify 'Anchors' - unambiguous high-confidence matches.
+        3. Pass 2: Fill gaps between anchors using constrained search windows.
+        """
         blocks = self._split_markdown_blocks(md_text)
-
-        tables = []
-        candidates = []
-        for it in raw_content_list or []:
-            if not isinstance(it, dict):
-                continue
-            if it.get("type") == "discarded":
-                continue
-            if it.get("type") == "table":
-                tables.append(it)
-                continue
-            txt = it.get("text")
-            if not isinstance(txt, str) or not txt.strip():
-                continue
-            cand = dict(it)
-            cand["_norm"] = self._normalize_match_text(txt)
-            candidates.append(cand)
-
-        def _sort_key(x: Dict[str, Any]):
-            page_idx = x.get("page_idx")
-            y0 = 0
-            bbox = x.get("bbox")
-            if isinstance(bbox, (list, tuple)) and len(bbox) >= 2:
-                try:
-                    y0 = float(bbox[1])
-                except Exception:
-                    pass
-            return (page_idx if isinstance(page_idx, int) else 10**9, y0)
-
-        candidates.sort(key=_sort_key)
         
-        # Prepare table definitions from both sources
-        table_defs = []
+        # --- Pre-processing ---
         
-        # 1. First, use enriched tables from GMFT (content_tables)
-        # Sort content_tables keys by page and y0 to ensure they are in reading order
-        table_items = []
-        if isinstance(content_tables, dict):
-            for table_id, t in content_tables.items():
-                if not isinstance(t, dict): continue
-                table_items.append((table_id, t))
-        
-        table_items.sort(key=lambda x: _sort_key(x[1]))
-
-        used_mineru_ids = set()
-        for table_id, t in table_items:
-            table_defs.append(
-                {
-                    "id": table_id,
-                    "page_idx": t.get("page_idx"),
-                    "bbox": t.get("bbox"),
-                    "table_body": t.get("md") or t.get("html") or t.get("text"),
-                    "cells": t.get("cells", []), # Pass cells through
-                    "is_enriched": True
-                }
-            )
-            if table_id.isdigit() or table_id.startswith("m_table_"):
-                used_mineru_ids.add(table_id)
-
-        # 2. Add tables from raw_content_list that weren't enriched
-        raw_tables_to_add = []
-        for t in tables:
-            m_id = str(t.get("id"))
-            if m_id in used_mineru_ids:
+        # 1. Prepare Text Candidates (PDF blocks)
+        text_candidates = []
+        for i, item in enumerate(raw_content_list):
+            if item.get("type") == "table":
                 continue
-            raw_tables_to_add.append(t)
+            text = item.get("text", "")
+            if text.strip():
+                prep = self._prep_text(text)
+                if prep.get("compact"):
+                    text_candidates.append(
+                        {
+                            "original_idx": i,
+                            "item": item,
+                            "text": text,
+                            "_compact": prep["compact"],
+                            "_shingles": prep["shingles"],
+                            "_text_len": prep["length"],
+                            "page_idx": item.get("page_idx"),
+                            "bbox": item.get("bbox"),
+                        }
+                    )
         
-        raw_tables_to_add.sort(key=_sort_key)
-        for t in raw_tables_to_add:
-            table_defs.append(
-                {
-                    "id": str(t.get("id")),
-                    "page_idx": t.get("page_idx"),
-                    "bbox": t.get("bbox"),
-                    "table_body": t.get("table_body") or t.get("html") or t.get("text"),
-                    "is_enriched": False
-                }
-            )
+        # 2. Prepare Table Candidates
+        table_candidates = []
+        for i, item in enumerate(raw_content_list):
+            if item.get("type") == "table":
+                # Ensure ID
+                if not item.get("id"):
+                     # Should have been assigned
+                     pass
+                table_candidates.append({
+                    "original_idx": i,
+                    "item": item,
+                    "page_idx": item.get("page_idx"),
+                    "id": item.get("id")
+                })
 
-        # Sort all table defs by page and position
-        table_defs.sort(key=_sort_key)
-
-        cand_ptr = 0
-        table_ptr = 0
-        out: List[Dict[str, Any]] = []
-
-        # Track used table_defs to avoid double matching
-        used_table_indices = set()
-        last_matched_page_idx = 0
-
-        new_blocks = []
-        for md_index, block in enumerate(blocks):
-            is_md_table = self._is_markdown_table_block(block)
-            is_html_table = self._is_html_table_block(block)
-            
-            if is_md_table or is_html_table:
-                # ... (table matching logic, no changes needed for text matching) ...
-                # But we should update last_matched_page_idx if table matches
-                # I'll handle that inside the table block if I can, or just let text matching handle it.
-                # Actually, table matching updates table_ptr but not explicitly last_matched_page_idx for text.
-                # Let's keep it simple and focus on text for now.
-                
-                best_match_idx = -1
-                best_score = 0.0
-                
-                # Try to find the best matching table in a window around table_ptr
-                # Tables often follow text order, so we can use current page as a guide
-                current_cand_page = candidates[cand_ptr].get("page_idx", 0) if cand_ptr < len(candidates) else 0
-                
-                search_start = max(0, table_ptr - 1)
-                search_end = min(len(table_defs), table_ptr + 5)
-                
-                for i in range(search_start, search_end):
-                    if i in used_table_indices:
-                        continue
-                    
-                    t_def = table_defs[i]
-                    score = self._calculate_text_similarity(block, t_def.get("table_body") or "")
-                    
-                    # Distance penalty: prefer tables on the current or nearby page
-                    table_page = t_def.get("page_idx", 0)
-                    page_diff = abs(table_page - current_cand_page)
-                    if page_diff > 2:
-                        score *= 0.7
-                    elif page_diff == 0:
-                        score *= 1.2 # Strong bonus for same page
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_match_idx = i
-                
-                # Fallback: if no decent match in window, search all unused tables
-                if best_score < 0.2:
-                    for i in range(len(table_defs)):
-                        if i in used_table_indices: continue
-                        t_def = table_defs[i]
-                        score = self._calculate_text_similarity(block, t_def.get("table_body") or "")
-                        table_page = t_def.get("page_idx", 0)
-                        
-                        # Use last_matched_page_idx as a guide too
-                        if last_matched_page_idx > 0 and table_page < last_matched_page_idx:
-                             score *= 0.1 # Heavily penalize backward tables
-
-                        page_diff = abs(table_page - current_cand_page)
-                        if page_diff > 4: score *= 0.5
-                        
-                        if score > best_score:
-                            best_score = score
-                            best_match_idx = i
-                
-                # Final fallback: if still no match, just take the next available table
-                if best_match_idx == -1:
-                    for i in range(len(table_defs)):
-                        if i not in used_table_indices:
-                            # Check if it's reasonable
-                            t_page = table_defs[i].get("page_idx", 0)
-                            if t_page >= last_matched_page_idx:
-                                best_match_idx = i
-                                best_score = 0.05 # Low score but matched
-                                break
-
-                if best_match_idx != -1:
-                    t = table_defs[best_match_idx]
-                    used_table_indices.add(best_match_idx)
-                    
-                    # Update last_matched_page_idx
-                    if isinstance(t.get("page_idx"), int):
-                        last_matched_page_idx = t.get("page_idx")
-
-                    # --- Check for cross-page continuation ---
-                    current_table_ids = [t.get("id")]
-                    combined_cells = list(t.get("cells", []))
-                    
-                    next_idx = best_match_idx + 1
-                    while next_idx < len(table_defs):
-                        nt = table_defs[next_idx]
-                        if next_idx in used_table_indices: 
-                            next_idx += 1
-                            continue
-                            
-                        t_cells = t.get("cells", [])
-                        nt_cells = nt.get("cells", [])
-                        
-                        t_cols = len(set(c.get("c") for c in t_cells)) if t_cells else 0
-                        nt_cols = len(set(c.get("c") for c in nt_cells)) if nt_cells else 0
-                        
-                        # Continuation if: consecutive page AND same number of columns
-                        if nt.get("page_idx") == t.get("page_idx") + 1 and t_cols == nt_cols and t_cols > 0:
-                            current_table_ids.append(nt.get("id"))
-                            used_table_indices.add(next_idx)
-                            
-                            max_row = max(c.get("r", 0) for c in combined_cells) if combined_cells else -1
-                            nt_header_rows = sorted(list(set(c.get("r") for c in nt_cells if c.get("is_header"))))
-                            
-                            row_offset = max_row + 1
-                            for nc in nt_cells:
-                                if nc.get("r") in nt_header_rows:
-                                    continue
-                                num_headers_before = sum(1 for hr in nt_header_rows if hr < nc.get("r"))
-                                adjusted_r = nc.get("r") - num_headers_before
-                                combined_cells.append({
-                                    **nc,
-                                    "r": adjusted_r + row_offset
-                                })
-                            
-                            # print(f"[{self.name}] Merged continuation Table ID {nt.get('id')} into {t.get('id')} (Skipped {len(nt_header_rows)} header rows)")
-                            t = nt 
-                            next_idx += 1
-                            # Update page idx for continuation
-                            if isinstance(nt.get("page_idx"), int):
-                                last_matched_page_idx = nt.get("page_idx")
-                        else:
-                            break
-                    
-                    table_ptr = next_idx
-                    
-                    # Update content_tables with combined cells if merged
-                    if len(current_table_ids) > 1:
-                        primary_id = current_table_ids[0]
-                        if primary_id in content_tables:
-                            content_tables[primary_id]["cells"] = combined_cells
-
-                    # Advance cand_ptr if table is far ahead
-                    table_page = table_defs[best_match_idx].get("page_idx")
-                    if isinstance(table_page, int) and table_page > current_cand_page:
-                        while cand_ptr < len(candidates) and candidates[cand_ptr].get("page_idx", 0) < table_page:
-                            cand_ptr += 1
-
-                    # print(f"[{self.name}] Matched MD Block {md_index} to Table ID {current_table_ids[0]} (Score: {best_score:.2f}, Page: {table_defs[best_match_idx].get('page_idx')}, Parts: {len(current_table_ids)})")
-                    
-                    # Use GMFT generated markdown for consistency with cells
-                    gmft_md = table_defs[best_match_idx].get("table_body")
-                    
-                    item = {
-                        "type": "table",
-                        "md_index": md_index,
-                        "id": current_table_ids[0],
-                        "page_idx": table_defs[best_match_idx].get("page_idx"),
-                        "bbox": table_defs[best_match_idx].get("bbox"),
-                        "table_body": gmft_md or block,
-                    }
-                    new_blocks.append(gmft_md or block)
+        # 3. Prepare Block Info
+        block_infos = []
+        for idx, block in enumerate(blocks):
+            info = {
+                "md_index": idx,
+                "is_table": self._is_markdown_table_block(block) or self._is_html_table_block(block),
+                "text": block,
+                "matched_cand": None, # Will store reference to candidate
+                "matched_type": None # "text" or "table"
+            }
+            if not info["is_table"]:
+                 # Extract plain text for matching
+                m = re.match(r"^(#{1,6})\s+(.+)$", (block or "").strip())
+                if m:
+                    info["plain_text"] = m.group(2).strip()
+                    info["text_level"] = len(m.group(1))
                 else:
-                    # print(f"[{self.name}] Found extra table block at {md_index} but no more table_defs.")
-                    item = {"type": "table", "md_index": md_index, "text": block}
-                    new_blocks.append(block)
-                out.append(item)
+                    info["plain_text"] = self._strip_markdown_text(block)
+                info["_prep"] = self._prep_text(info["plain_text"])
+            
+            block_infos.append(info)
+
+        last_anchor_page = 0
+        cand_ptr = 0
+        t_ptr = 0
+
+        for b_info in block_infos:
+            if b_info["is_table"]:
+                best_t_score = 0.0
+                best_t_idx = -1
+                b_text = (b_info.get("text") or "").strip()
+                for i in range(t_ptr, len(table_candidates)):
+                    t_cand = table_candidates[i]
+                    t_id = t_cand["id"]
+                    t_data = (content_tables or {}).get(t_id, {})
+                    t_md = t_data.get("md", "")
+                    t_html = t_data.get("html", "")
+                    for t_content in (t_md, t_html):
+                        if not t_content:
+                            continue
+                        score = self._calculate_text_similarity(b_text, t_content)
+                        if score > best_t_score:
+                            best_t_score = score
+                            best_t_idx = i
+                    if best_t_score >= 0.95:
+                        break
+
+                if best_t_idx == -1 or best_t_score < 0.55:
+                    search_limit = min(len(table_candidates), t_ptr + 5)
+                    for i in range(t_ptr, search_limit):
+                        t_cand = table_candidates[i]
+                        if t_cand["page_idx"] >= last_anchor_page - 1:
+                            best_t_idx = i
+                            break
+
+                if best_t_idx != -1:
+                    b_info["matched_cand"] = table_candidates[best_t_idx]
+                    b_info["matched_type"] = "table"
+                    b_info["is_anchor"] = True
+                    t_ptr = best_t_idx + 1
+                    last_anchor_page = max(last_anchor_page, table_candidates[best_t_idx]["page_idx"])
+                elif t_ptr < len(table_candidates):
+                    b_info["matched_cand"] = table_candidates[t_ptr]
+                    b_info["matched_type"] = "table"
+                    b_info["is_anchor"] = True
+                    last_anchor_page = max(last_anchor_page, table_candidates[t_ptr]["page_idx"])
+                    t_ptr += 1
                 continue
 
-            new_blocks.append(block)
-            text_level = None
-            m = re.match(r"^(#{1,6})\s+(.+)$", (block or "").strip())
-            if m:
-                text_level = len(m.group(1))
-                plain = m.group(2).strip()
-            else:
-                plain = self._strip_markdown_text(block)
+            md_prep = b_info.get("_prep") or {}
+            if not md_prep.get("compact"):
+                continue
 
-            # Search with a small look-back to handle slight OCR/layout reordering
-            # Reduced lookback from 100 to 30 to prevent matching far-back pages
-            anchor_idx = self._best_anchor_in_window(plain, candidates, max(0, cand_ptr - 30), 350, is_heading=(text_level is not None), min_page_idx=last_matched_page_idx)
+            target_len = md_prep.get("length") or 0
+            if target_len >= 80:
+                max_span = 8
+            elif target_len >= 30:
+                max_span = 6
+            elif target_len >= 12:
+                max_span = 4
+            else:
+                max_span = 1
+
+            window_start = max(0, cand_ptr - 5)
+            window_end = min(len(text_candidates), cand_ptr + 120)
+
+            best = self._best_span_match(md_prep, text_candidates, window_start, window_end, max_span)
+            if best and best.get("bbox") and best.get("page_idx") is not None and best.get("score", 0.0) >= 0.22:
+                b_info["matched_cand"] = best
+                b_info["matched_type"] = "text_span"
+                cand_ptr = best["end"] + 1
+                last_anchor_page = max(last_anchor_page, int(best["page_idx"]))
+            else:
+                if cand_ptr < len(text_candidates):
+                    fallback_cand = text_candidates[cand_ptr]
+                    if fallback_cand.get("bbox") is not None and fallback_cand.get("page_idx") is not None:
+                        b_info["matched_cand"] = {
+                            "start": cand_ptr,
+                            "end": cand_ptr,
+                            "score": 0.0,
+                            "page_idx": fallback_cand.get("page_idx"),
+                            "bbox": fallback_cand.get("bbox"),
+                            "cands": [fallback_cand],
+                        }
+                        b_info["matched_type"] = "text_span"
+                        cand_ptr += 1
+
+        # --- Final Construction ---
+        out_list = []
+        for b_info in block_infos:
+            item = {
+                "md_index": b_info["md_index"],
+                "type": "text"
+            }
+            if b_info["is_table"]:
+                item["type"] = "table"
+                
+            if b_info.get("matched_cand"):
+                cand = b_info["matched_cand"]
+                if b_info["matched_type"] == "table":
+                    item["id"] = cand.get("id")
+                    item["bbox"] = cand.get("item", {}).get("bbox")
+                    item["page_idx"] = cand.get("page_idx")
+                elif b_info["matched_type"] == "text_span":
+                    item["bbox"] = cand.get("bbox")
+                    item["page_idx"] = cand.get("page_idx")
+                    cands = cand.get("cands") or []
+                    if cands:
+                        item["source_raw_indices"] = [c.get("original_idx") for c in cands if c.get("original_idx") is not None]
+                else:
+                    item["bbox"] = cand.get("bbox")
+                    item["page_idx"] = cand.get("page_idx")
+                
+                if item.get("text_level"):
+                     item["text_level"] = b_info.get("text_level")
+                
+                # If text, we might want to copy text? Frontend doesn't strictly need it if bbox is there
+                item["text"] = b_info.get("plain_text", "")
             
-            if anchor_idx is None:
-                # Reduced fallback window from 2000 to 1000
-                anchor_idx = self._best_anchor_in_window(plain, candidates, max(0, cand_ptr - 50), 1000, is_heading=(text_level is not None), min_page_idx=last_matched_page_idx)
-
-            item = {"type": "text", "text": plain, "md_index": md_index}
-            if text_level:
-                item["text_level"] = text_level
-            if anchor_idx is not None:
-                anchor = candidates[anchor_idx]
-                
-                # --- Greedy Merge Logic ---
-                merged_bbox = list(anchor.get("bbox")) if anchor.get("bbox") else None
-                merged_text = anchor.get("_norm", "")
-                page_idx = anchor.get("page_idx")
-                
-                if isinstance(page_idx, int):
-                    item["page_idx"] = page_idx
-                    last_matched_page_idx = page_idx
-                
-                # Try to absorb subsequent candidates to fix split paragraph highlighting
-                next_ptr = anchor_idx + 1
-                matched_count = 0
-                plain_norm = self._normalize_match_text(plain)
-                
-                # Only try merging if the block is longer than the matched anchor
-                if len(plain_norm) > len(merged_text) + 5:
-                    while next_ptr < len(candidates) and next_ptr < anchor_idx + 20: # Limit lookahead
-                        cand = candidates[next_ptr]
-                        
-                        # Stop if page changes significantly (allow next page for cross-page paragraphs)
-                        cand_page = cand.get("page_idx")
-                        if cand_page != page_idx and cand_page != page_idx + 1:
-                            break
-                        
-                        cand_text = cand.get("_norm", "")
-                        if not cand_text:
-                            next_ptr += 1
-                            continue
-                            
-                        # Check if adding this candidate improves similarity to the block text
-                        combined = merged_text + cand_text
-                        
-                        sim_curr = self._calculate_text_similarity(plain_norm, merged_text)
-                        sim_new = self._calculate_text_similarity(plain_norm, combined)
-                        
-                        # Heuristic: If similarity improves, or if the candidate is clearly part of the text
-                        # (e.g. combined is a substring of plain_norm)
-                        is_substring = combined in plain_norm
-                        
-                        if sim_new >= sim_curr or is_substring or sim_new > 0.7:
-                            # Merge bbox
-                            c_bbox = cand.get("bbox")
-                            if c_bbox and merged_bbox:
-                                # If cross-page, we can't really merge bboxes easily for display unless we handle multi-rects.
-                                # For now, if same page, merge. If diff page, ignore bbox update but consume text.
-                                if cand_page == page_idx:
-                                    merged_bbox = [
-                                        min(merged_bbox[0], c_bbox[0]),
-                                        min(merged_bbox[1], c_bbox[1]),
-                                        max(merged_bbox[2], c_bbox[2]),
-                                        max(merged_bbox[3], c_bbox[3])
-                                    ]
-                            merged_text = combined
-                            matched_count += 1
-                            next_ptr += 1
-                        else:
-                            # If we encounter something that doesn't match, stop merging
-                            break
-                
-                if merged_bbox:
-                    item["bbox"] = merged_bbox
-                
-                # Advance cand_ptr to the end of the merged sequence
-                # Use max to ensure we don't go backwards if something weird happened
-                cand_ptr = max(cand_ptr, next_ptr if matched_count > 0 else anchor_idx + 1)
-            else:
-                # No match found, just advance slightly to avoid getting stuck? 
-                # No, cand_ptr stays, effectively skipping this block for matching purposes
-                pass
-
-            out.append(item)
-
-        return out, "\n\n".join(new_blocks)
+            out_list.append(item)
+            
+        return out_list, md_text
 
     def _calculate_iou(self, bbox1, bbox2):
         """
@@ -553,12 +428,11 @@ class MinerUParser(BaseParser):
         filename = os.path.basename(pdf_path)
         
         try:
-            # print(f"[{self.name}] Sending to API: {api_url}/file_parse")
             headers = {}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
                 
-            async with httpx.AsyncClient(verify=False, timeout=300.0) as client:
+            async with httpx.AsyncClient(verify=False, timeout=300.0, trust_env=False) as client:
                 with open(pdf_path, "rb") as f:
                     files = {'files': (filename, f, 'application/pdf')}
                     data = {
@@ -566,12 +440,19 @@ class MinerUParser(BaseParser):
                         "return_content_list": "true",
                         "return_md": "true"
                     }
-                    response = await client.post(
-                        f"{api_url}/file_parse",
-                        files=files,
-                        data=data,
-                        headers=headers
-                    )
+                    try:
+                        response = await client.post(
+                            f"{api_url}/file_parse",
+                            files=files,
+                            data=data,
+                            headers=headers
+                        )
+                    except httpx.ReadError as e:
+                        print(f"[{self.name}] Connection/Read error: {e}")
+                        raise HTTPException(status_code=502, detail=f"Failed to read response from MinerU API. This usually means the server closed the connection prematurely or a timeout occurred. Details: {str(e)}")
+                    except httpx.ConnectError as e:
+                        print(f"[{self.name}] Connection error: {e}")
+                        raise HTTPException(status_code=502, detail=f"Failed to connect to MinerU API at {api_url}. Please check if the URL is correct and accessible. Details: {str(e)}")
             
             if response.status_code != 200:
                 error_detail = f"MinerU API error: {response.status_code}"
@@ -590,7 +471,6 @@ class MinerUParser(BaseParser):
             
             first_filename = list(results.keys())[0]
             content = results[first_filename]
-            # print(f"[{self.name}] API Response content keys: {list(content.keys())}")
 
             md_content = content.get("md_content", "") or ""
             raw_content_list = _coerce_json_value(content.get("content_list", [])) or []
@@ -612,7 +492,6 @@ class MinerUParser(BaseParser):
             # Enrich tables using GMFT guided by MinerU
             final_content_tables = {}
             try:
-                # print(f"[{self.name}] Enriching tables with GMFT guided by MinerU...")
                 final_content_tables = self.table_extractor.extract_tables_from_pdf(pdf_path, raw_content_list)
             except Exception as e:
                 print(f"[{self.name}] Error enriching tables with GMFT: {e}")
@@ -637,12 +516,15 @@ class MinerUParser(BaseParser):
             write_text_file(os.path.join(task_result_dir, "content.md"), md_content)
             # content_list.json: Use the mapped list (links MD blocks to Table IDs)
             write_json_file(os.path.join(task_result_dir, "content_list.json"), md_first_list)
+            # raw_content_list.json: Save original MinerU content list for comparison
+            write_json_file(os.path.join(task_result_dir, "raw_content_list.json"), raw_content_list)
             # content_tables.json: Use GMFT extracted detailed cell info
             write_json_file(os.path.join(task_result_dir, "content_tables.json"), final_content_tables)
             
             return {
                 "md_url": f"content.md",
                 "content_list_url": f"content_list.json",
+                "raw_content_list_url": f"raw_content_list.json",
                 "content_tables_url": f"content_tables.json",
             }
 

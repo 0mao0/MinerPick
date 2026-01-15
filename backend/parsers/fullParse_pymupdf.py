@@ -1,4 +1,3 @@
-import os
 from typing import Dict, Any
 from .base import BaseParser
 
@@ -8,7 +7,7 @@ class PyMuPDFParser(BaseParser):
         return "PyMuPDF"
 
     def __init__(self):
-        pass
+        ...
 
     async def parse(self, pdf_path: str, task_result_dir: str, **kwargs) -> Dict[str, Any]:
         """

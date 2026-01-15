@@ -8,7 +8,11 @@
     "converting": "正在转换中...",
     "waiting": "等待上传...",
     "github": "GitHub",
-    "settings": "设置"
+    "settings": "设置",
+    "show_raw": "显示原始提取块 (蓝色)",
+    "hide_raw": "隐藏原始提取块",
+    "show_modified": "显示优化后区块 (红色)",
+    "hide_modified": "隐藏优化后区块"
   },
   "settings": {
     "title": "API 设置",
@@ -19,7 +23,10 @@
     "save": "保存设置",
     "reset": "重置默认",
     "save_success": "设置已保存",
-    "save_hint": "提示：如果不填写，将默认使用服务器配置"
+    "reset_success": "已重置为服务器默认设置",
+    "save_hint": "提示：如果不填写，将默认使用服务器配置",
+    "using_server_key": "正在使用服务器默认 Key",
+    "server_key_active": "已加载服务器配置"
   },
   "viewer": {
     "highlight_all": "全部高亮",
@@ -53,9 +60,22 @@
     "upload_failed": "文件上传失败",
     "starting_engine": "正在启动 {engine} 解析引擎进行深度解析...",
     "extracting_layout": "正在提取 PDF 布局与文字信息...",
-    "converting_markdown": "正在转换内容为 Markdown 格式...",
+    "converting_markdown": "正在生成 Markdown 内容...",
     "convert_success": "转换完成！",
     "convert_failed": "解析转换失败",
-    "parse_failed": "解析失败: {error}"
+    "parse_failed": "解析失败: {error}",
+    "mineru_not_configured": "MinerU 配置不完整，请在右上角设置中配置 API URL 和 Key"
+  },
+  "extract": {
+    "prompt": "提示词",
+    "regex": "Regex",
+    "flags": "Flags",
+    "run": "提取",
+    "reset": "清空",
+    "edit_prompt": "编辑提示词",
+    "found": "已提取 {count} 条",
+    "empty": "暂无提取结果",
+    "unmapped": "未映射",
+    "invalid_regex": "Regex 无效，请检查表达式与 flags"
   }
 }

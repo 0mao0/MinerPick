@@ -8,7 +8,11 @@
     "converting": "Converting...",
     "waiting": "Waiting for upload...",
     "github": "GitHub",
-    "settings": "Settings"
+    "settings": "Settings",
+    "show_raw": "Show Raw Blocks (Blue)",
+    "hide_raw": "Hide Raw Blocks",
+    "show_modified": "Show Optimized Blocks (Red)",
+    "hide_modified": "Hide Optimized Blocks"
   },
   "settings": {
     "title": "API Settings",
@@ -19,7 +23,10 @@
     "save": "Save Settings",
     "reset": "Reset Default",
     "save_success": "Settings saved",
-    "save_hint": "Hint: If left empty, the server configuration will be used by default."
+    "reset_success": "Reset to server defaults",
+    "save_hint": "Hint: If left empty, the server configuration will be used by default.",
+    "using_server_key": "Using server default Key",
+    "server_key_active": "Server config loaded"
   },
   "viewer": {
     "highlight_all": "Highlight All",
@@ -53,9 +60,22 @@
     "upload_failed": "File upload failed",
     "starting_engine": "Starting {engine} parsing engine for deep analysis...",
     "extracting_layout": "Extracting PDF layout and text info...",
-    "converting_markdown": "Converting content to Markdown format...",
+    "converting_markdown": "Generating Markdown content...",
+    "mineru_not_configured": "MinerU is not fully configured. Please set API URL and Key in Settings.",
     "convert_success": "Conversion completed!",
     "convert_failed": "Parsing and conversion failed",
     "parse_failed": "Parsing failed: {error}"
+  },
+  "extract": {
+    "prompt": "Prompt",
+    "regex": "Regex",
+    "flags": "Flags",
+    "run": "Extract",
+    "reset": "Clear",
+    "edit_prompt": "Edit Prompt",
+    "found": "{count} extracted",
+    "empty": "No results",
+    "unmapped": "Unmapped",
+    "invalid_regex": "Invalid regex. Check expression and flags."
   }
 }

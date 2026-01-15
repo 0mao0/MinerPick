@@ -19,12 +19,33 @@
           
           <!-- Annotation/Highlight layer -->
           <div class="annotation-layer">
+            <!-- Current Active Highlights (Selected from MD) -->
             <div 
               v-for="(hl, index) in getPageHighlights(pageNo)" 
-              :key="index"
-              class="highlight-rect highlight-animate"
+              :key="'active-' + index"
+              class="highlight-rect highlight-active highlight-animate"
               :style="hl.style"
             ></div>
+
+            <!-- All Original/Raw Blocks Highlights (Blue) -->
+            <template v-if="isRawVisible">
+              <div 
+                v-for="(hl, index) in getRawHighlights(pageNo)" 
+                :key="'raw-' + index"
+                class="highlight-rect highlight-raw"
+                :style="hl.style"
+              ></div>
+            </template>
+
+            <!-- All Modified/Optimized Blocks Highlights (Red) -->
+            <template v-if="isHighlightAll">
+              <div 
+                v-for="(hl, index) in getModifiedHighlights(pageNo)" 
+                :key="'mod-' + index"
+                class="highlight-rect highlight-modified"
+                :style="hl.style"
+              ></div>
+            </template>
           </div>
 
           <!-- Page loading placeholder -->
@@ -63,14 +84,18 @@ interface Props {
   highlights?: Highlight[];
   preferredY?: number;
   isHighlightAll?: boolean;
+  isRawVisible?: boolean;
   contentList?: any[];
+  rawContentList?: any[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
   highlights: () => [],
   preferredY: 0,
   isHighlightAll: false,
-  contentList: () => []
+  isRawVisible: false,
+  contentList: () => [],
+  rawContentList: () => []
 });
 
 // Use defineModel for two-way binding with parent components
@@ -251,6 +276,89 @@ const scrollToPage = async (pageNo: number) => {
 const handleScroll = () => {
   if (isScrollingManually.value) return;
   updateVisiblePages();
+};
+
+/**
+ * Calculate raw block highlight positions for a specific page (Blue)
+ */
+const getRawHighlights = (pageNo: number) => {
+  const vp = pageViewports[pageNo];
+  if (!vp) return [];
+
+  const pageIdx = pageNo - 1;
+  const rawBlocks = props.rawContentList ? props.rawContentList.filter(item => item.page_idx === pageIdx && item.bbox) : [];
+
+  return rawBlocks.map(item => {
+    const [x1, y1, x2, y2] = item.bbox;
+    const left = (x1 * vp.width) / 1000;
+    const top = (y1 * vp.height) / 1000;
+    const right = (x2 * vp.width) / 1000;
+    const bottom = (y2 * vp.height) / 1000;
+
+    return {
+      style: {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${right - left}px`,
+        height: `${bottom - top}px`
+      }
+    };
+  });
+};
+
+/**
+ * Calculate modified/optimized block highlight positions for a specific page (Red)
+ */
+const getModifiedHighlights = (pageNo: number) => {
+  const vp = pageViewports[pageNo];
+  if (!vp) return [];
+
+  const pageIdx = pageNo - 1;
+  const modifiedBlocks = props.contentList ? props.contentList.filter(item => item.page_idx === pageIdx && item.bbox) : [];
+  const extraBlocks: any[] = [];
+
+  if (props.rawContentList && props.rawContentList.length > 0 && props.contentList && props.contentList.length > 0) {
+    const rawById = new Map<string, any>();
+    for (const it of props.rawContentList) {
+      if (it && typeof it.id === 'string') rawById.set(it.id, it);
+    }
+    for (const item of props.contentList) {
+      if (!item || item.type !== 'table' || typeof item.id !== 'string') continue;
+      const m = item.id.match(/m_table_(\d+)/);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      const prev = rawById.get(`m_table_${n - 1}`);
+      if (prev && typeof item.page_idx === 'number' && prev.page_idx === item.page_idx - 1 && prev.page_idx === pageIdx && prev.bbox) {
+        extraBlocks.push(prev);
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  const allBlocks = [...modifiedBlocks, ...extraBlocks].filter(item => {
+    const key = `${item.page_idx}:${JSON.stringify(item.bbox)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return allBlocks.map(item => {
+    const [x1, y1, x2, y2] = item.bbox;
+    const left = (x1 * vp.width) / 1000;
+    const top = (y1 * vp.height) / 1000;
+    const right = (x2 * vp.width) / 1000;
+    const bottom = (y2 * vp.height) / 1000;
+
+    return {
+      style: {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${right - left}px`,
+        height: `${bottom - top}px`
+      }
+    };
+  });
 };
 
 /**
@@ -437,11 +545,28 @@ defineExpose({
 
 .highlight-rect {
   position: absolute;
-  background-color: rgba(255, 255, 0, 0.35);
-  border: 2px solid #ff6b35;
+  pointer-events: none;
   z-index: 10;
   border-radius: 2px;
+}
+
+.highlight-active {
+  background-color: rgba(255, 255, 0, 0.35);
+  border: 2px solid #ff6b35;
   box-shadow: 0 0 8px rgba(255, 107, 53, 0.4);
+  z-index: 20;
+}
+
+.highlight-raw {
+  background-color: rgba(24, 144, 255, 0.25);
+  border: 1.5px solid rgba(24, 144, 255, 0.8);
+  z-index: 10;
+}
+
+.highlight-modified {
+  background-color: rgba(255, 77, 79, 0.25);
+  border: 1.5px solid rgba(255, 77, 79, 0.8);
+  z-index: 15;
 }
 
 .highlight-animate {

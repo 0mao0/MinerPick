@@ -1,7 +1,5 @@
 import os
 import uuid
-import json
-import httpx
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -10,7 +8,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from config import settings
 from parsers import MinerUParser, PyMuPDFParser
-from parsers.base import write_json_file
 
 # Use absolute paths relative to this script
 BASE_DIR = Path(__file__).resolve().parent
@@ -52,23 +49,35 @@ def get_unique_filename(directory: Path, filename: str) -> Path:
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/api/config")
+async def get_config():
+    """Returns basic server configuration, sanitizing sensitive keys."""
+    masked_key = ""
+    if settings.mineru_api_key:
+        key = settings.mineru_api_key
+        if len(key) > 8:
+            masked_key = f"{key[:4]}{'*' * (len(key)-8)}{key[-4:]}"
+        else:
+            masked_key = "*" * len(key)
+            
+    return {
+        "mineru_api_url": settings.mineru_api_url,
+        "has_mineru_api_key": bool(settings.mineru_api_key),
+        "mineru_api_key_masked": masked_key,
+    }
+
 @app.post("/api/upload")
 async def upload_pdf(file: UploadFile = File(...)):
-    # print(f"Received upload request for file: {file.filename}")
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
     task_id = str(uuid.uuid4())
-    # print(f"Generated task_id: {task_id}")
     
-    # Save directly to settings.input_dir, add suffix if exists
     pdf_path = get_unique_filename(settings.input_dir, file.filename)
     final_filename = pdf_path.name
 
-    # print(f"Saving file to: {pdf_path}")
     with open(pdf_path, "wb") as f:
         f.write(await file.read())
-    # print("File saved successfully.")
 
     return {
         "task_id": task_id,
@@ -89,20 +98,19 @@ async def convert_pdf(request: ConvertRequest):
     filename = request.filename
     provider_name = request.provider.lower().strip()
     
-    # print(f"DEBUG: Received conversion request - task_id: {task_id}, provider: {provider_name}")
-    
-    # Locate input PDF directly in input_dir
     pdf_path = settings.input_dir / filename
     
     if not pdf_path.exists():
-        # Fallback to checking filename in input_dir if it was modified (e.g. with suffix)
-        pdf_path = settings.input_dir / filename
-        if not pdf_path.exists():
-            raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
-    # Set up task-specific output directory
     task_output_dir = settings.output_dir / task_id
     os.makedirs(task_output_dir, exist_ok=True)
+    
+    import shutil
+    try:
+        shutil.copy2(pdf_path, task_output_dir / filename)
+    except Exception as e:
+        print(f"Warning: Failed to copy source PDF to output directory: {e}")
 
     parser = PARSERS.get(provider_name)
     if not parser:
@@ -132,6 +140,8 @@ async def convert_pdf(request: ConvertRequest):
             "content_list_url": f"/results/{task_id}/{result['content_list_url']}",
             "content_tables_url": f"/results/{task_id}/{result['content_tables_url']}",
         }
+        if result.get("raw_content_list_url"):
+            response["raw_content_list_url"] = f"/results/{task_id}/{result['raw_content_list_url']}"
         return response
     except HTTPException as e:
         # Re-raise HTTPExceptions as they already have the correct format
