@@ -31,18 +31,20 @@
   <img src="docs/images/frontend_sync.png" width="500px" />
 </p>
 
-### 🆚 Comparison (vs. similar products)
+### 🆚 Comparison (Why MinerPick?)
 
-The table below compares MinerPick with other major open-source or commercial products.
+MinerPick is not just another PDF parser; it is a **human-in-the-loop workflow** designed to bridge the gap between raw parsing and high-quality LLM data.
 
-| Dimension | MinerPick (Target) | MinerU (Magic-PDF) | Marker | Docling | Unstructured / LlamaParse |
+| Dimension | **MinerPick (Ours)** | MinerU (Magic-PDF) | Marker | Docling | Unstructured |
 |---|---|---|---|---|---|
-| **Layout Restoration** | ✅ **High** <br>*(Visual + Structural)* | ✅ **High** <br>*(Structural)* | ✅ **High** <br>*(Structural)* | ✅ **High** <br>*(Structural)* | ❌ **Low** <br>*(Chunk-first)* |
-| **Sync Highlighting** | ✅ **Full-stack** <br>*(Ready-to-use UI)* | ⚠️ **Raw Data** <br>*(JSON Bbox available)* | ❌ **None** <br>*(Text-only)* | ⚠️ **Raw Data** <br>*(Granular Bbox)* | ⚠️ **Block-level** <br>*(Element Bbox)* |
-| **Table Coordinates** | ✅ **Cell-level** <br>*(Exact Bbox)* | ⚠️ **Structure** <br>*(HTML/MD Block)* | ❌ **Text-only** <br>*(MD Table)* | ⚠️ **Structure** <br>*(Parsed HTML)* | ⚠️ **Block-level** <br>*(Table Region)* |
-| **Editable Mapping** | ✅ **Native** <br>*(Keep bbox)* | ❌ **No** | ❌ **No** | ❌ **No** | ❌ **No** |
-| **Self-Hostable** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** | ✅ **Yes** | ⚠️ **Partial** <br>*(Limited/OSS)* |
-| **API Interface** | ✅ **FastAPI** <br>*(HTTP Service)* | ⚠️ **CLI/SDK** <br>*(Python Lib)* | ❌ **Script** <br>*(Local Tool)* | ⚠️ **Python Lib** <br>*(Local SDK)* | ✅ **API-First** <br>*(Cloud/SaaS)* |
+| **Category** | 🛠️ **Interactive Workflow** | 🏗️ Core Parser | 🏗️ Core Parser | 🏗️ Core Parser | 🏗️ Data Pipeline |
+| **Visual Sync** | ✅ **Bi-directional** <br>*(Click MD to locate PDF)* | ⚠️ JSON Only <br>*(No UI provided)* | ❌ None <br>*(Text-only output)* | ⚠️ JSON Only <br>*(No UI provided)* | ⚠️ Bbox Only <br>*(Elements only)* |
+| **Table Precision**| ✅ **Cell-level Mapping** <br>*(via gmft enrichment)* | ⚠️ Block-level <br>*(HTML/MD structure)* | ❌ Low <br>*(Plain MD table)* | ⚠️ High <br>*(Structured HTML)* | ⚠️ Medium <br>*(Regional bbox)* |
+| **Human-in-loop** | ✅ **Editable UI** <br>*(Fix errors on the fly)* | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Verification** | ✅ **Side-by-side** <br>*(Pixel-level verification)* | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Deployment** | ✅ **Full-stack (FastAPI)** | ⚠️ CLI / SDK | ❌ CLI Only | ⚠️ Python SDK | ✅ API / SaaS |
+
+---
 
 ### 🧪 Cases (Coming soon)
 
@@ -101,19 +103,20 @@ npm run dev
 </p>
 
 
-### 🆚 同类产品对比
+### 🆚 同类产品对比（为什么选择 MinerPick？）
 
-下表将 MinerPick 与市场其他主流开源或商业产品进行对比。
+MinerPick 不仅仅是一个 PDF 解析器，它是一个**人机协同（Human-in-the-loop）的工作流**，旨在解决原始解析数据与高质量 LLM 数据之间的“最后一公里”问题。
 
-| 维度 | MinerPick (目标产品) | MinerU (Magic-PDF) | Marker | Docling | Unstructured / LlamaParse |
+| 维度 | **MinerPick (本项目)** | MinerU (Magic-PDF) | Marker | Docling | Unstructured |
 |---|---|---|---|---|---|
-| **版面还原能力** | ✅ **高** <br>*(视觉 + 结构)* | ✅ **高** <br>*(结构级)* | ✅ **高** <br>*(结构级)* | ✅ **高** <br>*(结构级)* | ❌ **低** <br>*(分块优先)* |
-| **同步高亮** | ✅ **全栈支持** <br>*(开箱即用 UI)* | ⚠️ **原始数据** <br>*(含 JSON 坐标)* | ❌ **无** <br>*(纯文本)* | ⚠️ **原始数据** <br>*(细粒度坐标)* | ⚠️ **块级** <br>*(元素坐标)* |
-| **表格坐标** | ✅ **单元格级** <br>*(精确 Bbox)* | ⚠️ **结构级** <br>*(HTML/MD 块)* | ❌ **纯文本** <br>*(MD 表格)* | ⚠️ **结构级** <br>*(解析后的 HTML)* | ⚠️ **块级** <br>*(表格区域)* |
-| **可编辑映射** | ✅ **原生支持** <br>*(保留 Bbox)* | ❌ **不支持** | ❌ **不支持** | ❌ **不支持** | ❌ **不支持** |
-| **本地化部署** | ✅ **支持** | ✅ **支持** | ✅ **支持** | ✅ **支持** | ⚠️ **部分支持** <br>*(有限/开源版)* |
-| **API 优先架构** | ✅ **FastAPI** <br>*(HTTP 服务)* | ⚠️ **CLI/SDK** <br>*(Python 库)* | ❌ **脚本** <br>*(本地工具)* | ⚠️ **Python 库** <br>*(本地 SDK)* | ✅ **API 优先** <br>*(云服务/SaaS)* |
+| **产品定位** | 🛠️ **交互式工作流** | 🏗️ 核心解析引擎 | 🏗️ 核心解析引擎 | 🏗️ 核心解析引擎 | 🏗️ 数据流水线 |
+| **视觉同步** | ✅ **双向同步** <br>*(点击 MD 定位 PDF)* | ⚠️ 仅 JSON <br>*(无原生 UI)* | ❌ 无 <br>*(仅纯文本输出)* | ⚠️ 仅 JSON <br>*(无原生 UI)* | ⚠️ 仅 Bbox <br>*(元素级)* |
+| **表格精度**| ✅ **单元格级映射** <br>*(通过 gmft 增强)* | ⚠️ 结构级 <br>*(HTML/MD 结构)* | ❌ 低 <br>*(纯 MD 表格)* | ⚠️ 高 <br>*(结构化 HTML)* | ⚠️ 中 <br>*(区域级 Bbox)* |
+| **人机协同** | ✅ **可编辑 UI** <br>*(即时修正解析错误)* | ❌ 否 | ❌ 否 | ❌ 否 | ❌ 否 |
+| **验证能力** | ✅ **像素级对齐** <br>*(双栏对照验证)* | ❌ 否 | ❌ 否 | ❌ 否 | ❌ 否 |
+| **部署方式** | ✅ **全栈服务 (FastAPI)** | ⚠️ CLI / SDK | ❌ 仅 CLI | ⚠️ Python SDK | ✅ API / SaaS |
 
+---
 
 ### 🧪 案例（待发布）
 
