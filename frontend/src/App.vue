@@ -267,9 +267,9 @@
           />
         </a-form-item>
         <a-form-item :label="t('settings.mineru_api_key')">
-          <a-input-password 
+          <a-input 
             v-model:value="mineruApiKey" 
-            :visibility-toggle="false"
+            type="password"
             :placeholder="serverConfig?.has_mineru_api_key ? t('settings.using_server_key') : t('settings.mineru_api_key_placeholder')" 
           />
           <div v-if="!mineruApiKey && serverConfig?.has_mineru_api_key" style="margin-top: 4px; font-size: 12px; color: #52c41a;">
